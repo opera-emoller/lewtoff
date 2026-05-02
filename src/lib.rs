@@ -22,6 +22,9 @@ mod codebook;
 mod floor1;
 
 #[doc(hidden)]
+pub mod psy;
+
+#[doc(hidden)]
 pub mod mdct;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
