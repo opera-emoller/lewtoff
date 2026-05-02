@@ -57,6 +57,12 @@ parity-diff input rate channels:
 regen-setup-blob:
     cargo run -p gen-setup-blob
 
+# Regenerate tests/vectors/headers/*.bin reference files from a fresh
+# ffmpeg-libvorbis encode for each supported (rate × channels) combo.
+regen-header-vectors:
+    cargo run -p gen-header-vectors
+    cp src/setup_blob.bin tests/vectors/headers/setup.bin
+
 # Build the table generator and write src/tables/*.rs.
 regen-tables:
     cargo run --bin gen-tables

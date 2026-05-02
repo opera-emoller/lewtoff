@@ -1,0 +1,12 @@
+[package]
+name = "gen-header-vectors"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "gen-header-vectors"
+path = "src/main.rs"
+
+[dependencies]
+ogg = "0.9"
