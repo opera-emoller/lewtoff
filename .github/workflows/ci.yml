@@ -25,9 +25,9 @@ jobs:
             || { echo "Wrong libvorbis version — parity tests pin to 1.3.x"; exit 1; }
       - run: cargo fmt --all -- --check
       - run: cargo clippy --all-targets -- -D warnings
-      - run: cargo nextest run --status-level=fail
+      - run: cargo nextest run --status-level=fail --no-tests=warn
       - name: Oracle parity (Linux glibc libm path)
-        run: cargo nextest run --features oracle parity_
+        run: cargo nextest run --features oracle --no-tests=warn parity_
 
   wasm:
     runs-on: ubuntu-latest
