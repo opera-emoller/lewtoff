@@ -101,4 +101,12 @@ mod tests {
         assert_eq!(w.bit_len(), 12);
         assert_eq!(w.into_bytes(), vec![0xFF, 0x0F]);
     }
+
+    #[test]
+    fn write_u32_emits_little_endian_bytes() {
+        let mut w = BitWriter::new();
+        w.write(0x12345678, 32);
+        assert_eq!(w.bit_len(), 32);
+        assert_eq!(w.into_bytes(), vec![0x78, 0x56, 0x34, 0x12]);
+    }
 }
