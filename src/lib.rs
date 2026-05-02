@@ -21,6 +21,9 @@ mod codebook;
 #[allow(dead_code)]
 mod floor1;
 
+#[allow(dead_code)]
+mod residue;
+
 #[doc(hidden)]
 pub mod psy;
 
