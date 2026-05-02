@@ -12,6 +12,9 @@ mod bitpack;
 #[allow(dead_code)]
 mod tables;
 
+#[doc(hidden)]
+pub mod mdct;
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum SampleRate {
     Hz44100,
