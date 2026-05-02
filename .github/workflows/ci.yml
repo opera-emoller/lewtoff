@@ -26,6 +26,8 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo nextest run --status-level=fail --no-tests=warn
+      # TODO: flip --no-tests=warn → --no-tests=fail once tests/parity.rs lands in Phase 8/9.
+      # Until then, the parity_ filter matches nothing and we don't want the step to fail.
       - name: Oracle parity (Linux glibc libm path)
         run: cargo nextest run --features oracle --no-tests=warn parity_
 

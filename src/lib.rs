@@ -23,7 +23,5 @@ pub enum Channels {
 /// Output is byte-for-byte identical to `ffmpeg -c:a libvorbis -q:a 5` for the
 /// supported input space (see crate docs / `README.md`).
 pub fn encode(_samples: &[i16], _rate: SampleRate, _channels: Channels) -> Vec<u8> {
-    // Phase 9 will wire this through the encoder. Until then, calling this is
-    // a programmer error.
-    unimplemented!("end-to-end encode is wired up in Phase 9")
+    unimplemented!("not yet implemented — see Phase 9 in README.md")
 }
