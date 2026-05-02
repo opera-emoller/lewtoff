@@ -92,4 +92,13 @@ mod tests {
         assert_eq!(w.bit_len(), 8);
         assert_eq!(w.into_bytes(), vec![0x5A]);
     }
+
+    #[test]
+    fn write_spans_byte_boundary() {
+        let mut w = BitWriter::new();
+        w.write(0xF, 4);
+        w.write(0xFF, 8);
+        assert_eq!(w.bit_len(), 12);
+        assert_eq!(w.into_bytes(), vec![0xFF, 0x0F]);
+    }
 }
