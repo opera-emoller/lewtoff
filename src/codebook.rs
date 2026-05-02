@@ -188,7 +188,7 @@ fn _make_words(lengths: &[u8], n: usize) -> Option<Vec<u32>> {
     for i in 0..n {
         let length = lengths[i] as usize;
         if length > 0 {
-            let entry = marker[length];
+            let mut entry = marker[length];
 
             if length < 32 && (entry >> length) != 0 {
                 return None; // overpopulated tree
@@ -210,10 +210,8 @@ fn _make_words(lengths: &[u8], n: usize) -> Option<Vec<u32>> {
 
             for j in (length + 1)..33 {
                 if (marker[j] >> 1) == entry {
-                    let e = marker[j];
+                    entry = marker[j];
                     marker[j] = marker[j - 1] << 1;
-                    // suppress unused assignment warning
-                    let _ = e;
                 } else {
                     break;
                 }
@@ -226,10 +224,13 @@ fn _make_words(lengths: &[u8], n: usize) -> Option<Vec<u32>> {
     // check for underpopulated tree (allow single-entry codebook exception)
     if !(count == 1 && marker[2] == 2) {
         for i in 1usize..33 {
-            if i < 32 {
-                if marker[i] & (0xffff_ffffu32 >> (32 - i)) != 0 {
-                    return None;
-                }
+            let mask = if i < 32 {
+                0xffff_ffffu32 >> (32 - i)
+            } else {
+                0xffff_ffffu32
+            };
+            if marker[i] & mask != 0 {
+                return None;
             }
         }
     }
@@ -499,4 +500,178 @@ pub(crate) fn unpack_q5_codebooks(blob: &[u8]) -> Result<Vec<Codebook>, Codebook
         books.push(unpack_codebook(&mut r)?);
     }
     Ok(books)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Pack a synthetic codebook using BitWriter (same format as vorbis_staticbook_pack)
+    /// and verify our unpack recovers the correct fields.
+    fn pack_codebook_no_map_ordered(w: &mut BitWriter) {
+        // sync
+        w.write(0x564342, 24);
+        // dim = 1
+        w.write(1, 16);
+        // entries = 4
+        w.write(4, 24);
+        // ordered = 1
+        w.write(1, 1);
+        // initial length: 1 - 1 = 0 (so first length is 1)
+        w.write(0, 5);
+        // ordered encoding: how many entries at each length
+        // length 1: 1 entry -> write count=1 using ov_ilog(4-0)=3 bits
+        w.write(1, 3); // entries at length 1: 1
+                       // now i=1, length=2; ov_ilog(4-1)=2 bits
+        w.write(1, 2); // entries at length 2: 1
+                       // now i=2, length=3; ov_ilog(4-2)=2 bits
+        w.write(2, 2); // entries at length 3: 2
+                       // maptype = 0 (no mapping)
+        w.write(0, 4);
+    }
+
+    #[test]
+    fn synthetic_codebook_ordered_no_map_roundtrip() {
+        let mut w = BitWriter::new();
+        pack_codebook_no_map_ordered(&mut w);
+        let bytes = w.into_bytes();
+
+        let mut r = BitReader::new(&bytes);
+        let book = unpack_codebook(&mut r).expect("unpack failed");
+
+        assert_eq!(book.entries, 4);
+        assert_eq!(book.dim, 1);
+        assert_eq!(book.maptype, 0);
+        assert!(book.value_vectors.is_none());
+        assert_eq!(book.codeword_lengths, vec![1, 2, 3, 3]);
+        // codewords should be valid (not all-max)
+        assert_ne!(book.codewords[0], u32::MAX);
+    }
+
+    #[test]
+    fn synthetic_codebook_unordered_sparse_no_map() {
+        let mut w = BitWriter::new();
+        // sync
+        w.write(0x564342, 24);
+        // dim = 2
+        w.write(2, 16);
+        // entries = 3
+        w.write(3, 24);
+        // ordered = 0
+        w.write(0, 1);
+        // unused = 1 (sparse)
+        w.write(1, 1);
+        // entry 0: used=1, length=2-1=1
+        w.write(1, 1);
+        w.write(1, 5);
+        // entry 1: used=1, length=3-1=2
+        w.write(1, 1);
+        w.write(2, 5);
+        // entry 2: used=0
+        w.write(0, 1);
+        // maptype = 0
+        w.write(0, 4);
+
+        let bytes = w.into_bytes();
+        let mut r = BitReader::new(&bytes);
+        let book = unpack_codebook(&mut r).expect("unpack failed");
+
+        assert_eq!(book.entries, 3);
+        assert_eq!(book.dim, 2);
+        assert_eq!(book.maptype, 0);
+        assert_eq!(book.codeword_lengths[0], 2);
+        assert_eq!(book.codeword_lengths[1], 3);
+        assert_eq!(book.codeword_lengths[2], 0); // unused
+    }
+
+    #[test]
+    fn bad_sync_returns_error() {
+        let mut w = BitWriter::new();
+        w.write(0xDEADBE, 24); // wrong sync
+        w.write(1, 16);
+        w.write(4, 24);
+        let bytes = w.into_bytes();
+        let mut r = BitReader::new(&bytes);
+        assert!(
+            matches!(unpack_codebook(&mut r), Err(CodebookError::BadSync)),
+            "expected BadSync error"
+        );
+    }
+
+    #[test]
+    fn q5_blob_unpacks_all_codebooks() {
+        let books = unpack_q5_codebooks(Q5_SETUP_BLOB).expect("Q5 blob unpack failed");
+        // Q5 setup has 30 codebooks per Vorbis spec (standard Q5 configuration)
+        assert!(
+            books.len() >= 10,
+            "expected >=10 codebooks, got {}",
+            books.len()
+        );
+        assert!(books.len() <= 256, "too many codebooks: {}", books.len());
+        // All books must have at least 1 entry
+        for (i, b) in books.iter().enumerate() {
+            assert!(b.entries > 0, "codebook {} has 0 entries", i);
+            assert!(b.dim > 0, "codebook {} has 0 dim", i);
+        }
+    }
+
+    #[test]
+    fn q5_codebooks_cache_returns_same_ptr() {
+        let a = q5_codebooks();
+        let b = q5_codebooks();
+        assert!(
+            std::ptr::eq(a as *const _, b as *const _),
+            "OnceLock must return same allocation"
+        );
+    }
+
+    #[test]
+    fn encode_emits_correct_bits() {
+        // Single-entry codebook: length=1, codeword=0
+        let book = Codebook {
+            entries: 1,
+            dim: 1,
+            codewords: vec![0],
+            codeword_lengths: vec![1],
+            value_vectors: None,
+            maptype: 0,
+            quantvals: 0,
+            minval: 0,
+            delta: 0,
+        };
+        let mut w = BitWriter::new();
+        let bits = book.encode(0, &mut w);
+        assert_eq!(bits, 1);
+        assert_eq!(w.into_bytes(), vec![0x00]);
+    }
+
+    #[test]
+    fn vq_search_finds_nearest() {
+        // 2-entry codebook, dim=1: entry 0 = -1.0, entry 1 = 1.0
+        let book = Codebook {
+            entries: 2,
+            dim: 1,
+            codewords: vec![0, 1],
+            codeword_lengths: vec![1, 1],
+            value_vectors: Some(vec![-1.0, 1.0]),
+            maptype: 1,
+            quantvals: 2,
+            minval: -1,
+            delta: 2,
+        };
+        let mut v = [0.3f32];
+        let entry = book.vq_search(&mut v);
+        assert_eq!(entry, 1); // nearest to 0.3 is 1.0
+        assert!((v[0] - (0.3 - 1.0)).abs() < 1e-5);
+    }
+
+    #[test]
+    fn float32_unpack_roundtrip_known_values() {
+        // Test known values from libvorbis test cases:
+        // -533200896 and 1611661312 appear in sharedbook.c self-test
+        let mindel = _float32_unpack(-533200896i32 as u32);
+        let delta = _float32_unpack(1611661312u32);
+        assert!((mindel - (-3.0f32)).abs() < 0.01, "mindel={mindel}");
+        assert!((delta - 1.0f32).abs() < 0.01, "delta={delta}");
+    }
 }
