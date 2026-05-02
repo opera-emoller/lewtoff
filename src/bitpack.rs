@@ -1,8 +1,4 @@
 //! LSB-first bit writer, per Vorbis I §2.1.4.
-//!
-//! This is the only bit-level I/O the encoder does. Reads come later (Phase 7+
-//! when we need to verify the setup-header round-trip via lewton); for now we
-//! only emit.
 
 #[derive(Default)]
 pub(crate) struct BitWriter {
@@ -17,7 +13,6 @@ impl BitWriter {
         Self::default()
     }
 
-    /// Total number of bits written so far.
     pub fn bit_len(&self) -> usize {
         if self.bytes.is_empty() {
             0
@@ -26,13 +21,11 @@ impl BitWriter {
         }
     }
 
-    /// Consume the writer and return the underlying bytes.
-    /// The final byte is zero-padded in its unused high bits.
     pub fn into_bytes(self) -> Vec<u8> {
         self.bytes
     }
 
-    /// Write the low `bits` bits of `value`, LSB-first. `bits` must be `<= 32`.
+    /// LSB-first; `bits` must be `<= 32`.
     pub fn write(&mut self, value: u32, bits: u32) {
         debug_assert!(bits <= 32, "bits must be <= 32, got {bits}");
         if bits == 0 {
@@ -134,8 +127,6 @@ mod tests {
         assert_eq!(w.into_bytes(), vec![0x0F]);
     }
 
-    /// LSB-first bit reader — only used inside this test module to round-trip
-    /// against `BitWriter`. Not part of the public API.
     struct BitReader<'a> {
         bytes: &'a [u8],
         bit_pos: usize,
