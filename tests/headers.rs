@@ -113,7 +113,7 @@ fn comment_header_stereo_48000_matches_ffmpeg() {
 #[test]
 fn setup_header_matches_ffmpeg() {
     let mut w = make_writer();
-    write_setup_header(&mut w);
+    write_setup_header(SampleRate::Hz44100, Channels::Mono, &mut w);
     let actual = w.into_bytes();
     let expected = include_bytes!("vectors/headers/setup.bin");
     assert_eq!(

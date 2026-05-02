@@ -33,6 +33,9 @@ pub mod psy;
 #[doc(hidden)]
 pub mod mdct;
 
+#[doc(hidden)]
+pub mod ogg_pages;
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum SampleRate {
     Hz44100,

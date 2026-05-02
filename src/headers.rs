@@ -4,7 +4,7 @@
 //! produces for the supported (rate × channels) input space.
 
 use crate::bitpack::BitWriter;
-use crate::setup_blob::Q5_SETUP_BLOB;
+use crate::setup_blob::{Q5_SETUP_MONO44, Q5_SETUP_MONO48, Q5_SETUP_STEREO44, Q5_SETUP_STEREO48};
 use crate::{Channels, SampleRate};
 
 /// Vendor string written by ffmpeg-libvorbis into the comment header.
@@ -90,9 +90,16 @@ pub fn write_comment_header(w: &mut BitWriter) {
 /// Write the Vorbis setup header packet (packet type 0x05).
 ///
 /// The packet is the embedded Q5 setup blob byte-for-byte; it already
-/// starts with the 0x05 + "vorbis" sync sequence.
-pub fn write_setup_header(w: &mut BitWriter) {
-    for &b in Q5_SETUP_BLOB {
+/// starts with the 0x05 + "vorbis" sync sequence. The blob varies by
+/// both sample rate and channel count.
+pub fn write_setup_header(rate: SampleRate, channels: Channels, w: &mut BitWriter) {
+    let blob = match (rate, channels) {
+        (SampleRate::Hz44100, Channels::Mono) => Q5_SETUP_MONO44,
+        (SampleRate::Hz48000, Channels::Mono) => Q5_SETUP_MONO48,
+        (SampleRate::Hz44100, Channels::Stereo) => Q5_SETUP_STEREO44,
+        (SampleRate::Hz48000, Channels::Stereo) => Q5_SETUP_STEREO48,
+    };
+    for &b in blob {
         w.write(b as u32, 8);
     }
 }
