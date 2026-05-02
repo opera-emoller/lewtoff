@@ -7,9 +7,6 @@
 #![forbid(unsafe_code)]
 
 #[allow(dead_code)]
-mod bitpack;
-
-#[allow(dead_code)]
 mod tables;
 
 #[allow(dead_code)]
@@ -23,6 +20,12 @@ mod floor1;
 
 #[allow(dead_code)]
 mod residue;
+
+#[doc(hidden)]
+pub mod bitpack;
+
+#[doc(hidden)]
+pub mod headers;
 
 #[doc(hidden)]
 pub mod psy;

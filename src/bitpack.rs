@@ -1,7 +1,7 @@
 //! LSB-first bit packer/unpacker, per Vorbis I §2.1.4.
 
 #[derive(Default)]
-pub(crate) struct BitWriter {
+pub struct BitWriter {
     bytes: Vec<u8>,
     /// Number of bits already written into the *last* byte of `bytes`. In
     /// `1..=8`. When `bytes` is empty, no bits have been written yet.
@@ -96,6 +96,7 @@ impl<'a> BitReader<'a> {
     }
 
     /// Read `bits` bits and sign-extend to `i32`.
+    #[allow(dead_code)]
     pub fn read_signed(&mut self, bits: u32) -> i32 {
         let v = self.read(bits);
         if bits == 0 {
