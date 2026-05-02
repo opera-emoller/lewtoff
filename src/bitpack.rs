@@ -83,4 +83,13 @@ mod tests {
         assert_eq!(w.bit_len(), 4);
         assert_eq!(w.into_bytes(), vec![0x0A]);
     }
+
+    #[test]
+    fn two_nibbles_pack_into_one_byte() {
+        let mut w = BitWriter::new();
+        w.write(0xA, 4);
+        w.write(0x5, 4);
+        assert_eq!(w.bit_len(), 8);
+        assert_eq!(w.into_bytes(), vec![0x5A]);
+    }
 }
