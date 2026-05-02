@@ -40,12 +40,12 @@ test:
     fi
 
 test-verbose:
-    cargo nextest run
+    cargo nextest run --no-tests=warn
 
 # Oracle parity: requires ffmpeg with libvorbis 1.3.7 on PATH.
 # Encodes the same input via lewtoff and via ffmpeg, byte-diffs the output.
 parity:
-    cargo nextest run --features oracle parity_
+    cargo nextest run --features oracle --no-tests=warn parity_
 
 # Per-chunk diff helper for parity failures.
 # Usage: just parity-diff input.s16le 44100 mono
