@@ -33,8 +33,35 @@ impl BitWriter {
     }
 
     /// Write the low `bits` bits of `value`, LSB-first. `bits` must be `<= 32`.
-    pub fn write(&mut self, _value: u32, _bits: u32) {
-        unimplemented!("Phase 1 Task 1.2")
+    pub fn write(&mut self, value: u32, bits: u32) {
+        debug_assert!(bits <= 32, "bits must be <= 32, got {bits}");
+        if bits == 0 {
+            return;
+        }
+        let mut value = if bits == 32 {
+            value
+        } else {
+            value & ((1u32 << bits) - 1)
+        };
+        let mut bits_remaining = bits as u8;
+
+        while bits_remaining > 0 {
+            if self.bytes.is_empty() || self.bits_in_last == 8 {
+                self.bytes.push(0);
+                self.bits_in_last = 0;
+            }
+
+            let space = 8 - self.bits_in_last;
+            let take = bits_remaining.min(space);
+
+            let chunk = (value & ((1u32 << take) - 1)) as u8;
+            let last = self.bytes.last_mut().expect("just pushed if needed");
+            *last |= chunk << self.bits_in_last;
+
+            self.bits_in_last += take;
+            bits_remaining -= take;
+            value >>= take;
+        }
     }
 }
 
@@ -47,5 +74,13 @@ mod tests {
         let w = BitWriter::new();
         assert_eq!(w.bit_len(), 0);
         assert_eq!(w.into_bytes(), Vec::<u8>::new());
+    }
+
+    #[test]
+    fn write_low_nibble_lands_in_low_bits_of_first_byte() {
+        let mut w = BitWriter::new();
+        w.write(0xA, 4);
+        assert_eq!(w.bit_len(), 4);
+        assert_eq!(w.into_bytes(), vec![0x0A]);
     }
 }
