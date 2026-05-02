@@ -125,4 +125,12 @@ mod tests {
         assert_eq!(w.bit_len(), 8);
         assert_eq!(w.into_bytes(), vec![0x00]);
     }
+
+    #[test]
+    fn high_bits_above_width_are_discarded() {
+        let mut w = BitWriter::new();
+        w.write(0xFF, 4);
+        assert_eq!(w.bit_len(), 4);
+        assert_eq!(w.into_bytes(), vec![0x0F]);
+    }
 }
