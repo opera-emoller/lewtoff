@@ -6,6 +6,9 @@
 
 #![forbid(unsafe_code)]
 
+#[allow(dead_code)]
+mod bitpack;
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum SampleRate {
     Hz44100,
