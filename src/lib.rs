@@ -18,6 +18,9 @@ mod setup_blob;
 #[allow(dead_code)]
 mod codebook;
 
+#[allow(dead_code)]
+mod floor1;
+
 #[doc(hidden)]
 pub mod mdct;
 
