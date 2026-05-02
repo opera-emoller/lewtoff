@@ -1,0 +1,6 @@
+/target
+*.log
+.DS_Store
+/oracle-cache
+/tests/fixtures/oracle-out/*.ogg
+!/tests/fixtures/oracle-out/.keep

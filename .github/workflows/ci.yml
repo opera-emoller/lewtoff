@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+      - name: Install ffmpeg (oracle parity tests shell out to it)
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: Verify libvorbis version
+        run: |
+          ffmpeg -version 2>&1 | grep -E "libvorbis 1\.3" \
+            || { echo "Wrong libvorbis version — parity tests pin to 1.3.x"; exit 1; }
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo nextest run --status-level=fail
+      - name: Oracle parity (Linux glibc libm path)
+        run: cargo nextest run --features oracle parity_
+
+  wasm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          target: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - name: Build for wasm32-unknown-unknown
+        run: cargo build --target wasm32-unknown-unknown --release

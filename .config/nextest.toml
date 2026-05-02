@@ -1,0 +1,4 @@
+[profile.default]
+status-level = "fail"
+final-status-level = "flaky"
+slow-timeout = { period = "30s", terminate-after = 2 }

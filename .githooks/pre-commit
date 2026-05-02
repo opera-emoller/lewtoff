@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Pre-commit hook: refuse commits with unformatted Rust or clippy warnings.
+#
+# Install once per clone:  just install-hooks
+# Bypass (don't):          git commit --no-verify
+#
+# Runs only when staged changes touch .rs files.
+
+set -eu
+
+staged_rs=$(git diff --cached --name-only --diff-filter=ACMR | grep -E '\.rs$' || true)
+if [ -z "$staged_rs" ]; then
+    exit 0
+fi
+
+if ! cargo fmt --all -- --check >/dev/null 2>&1; then
+    echo "error: cargo fmt --check failed. Run:"
+    echo "    cargo fmt --all"
+    echo "and re-stage the changes."
+    exit 1
+fi
+
+if ! cargo clippy --all-targets -- -D warnings 2>&1; then
+    echo ""
+    echo "error: cargo clippy failed. Fix the warnings above and re-stage."
+    exit 1
+fi
