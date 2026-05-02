@@ -67,6 +67,20 @@ regen-trig-table:
     cargo run -p gen-tables
     cargo fmt --all
 
+# Regenerate tests/vectors/mdct/*.bin from libvorbis 1.3.7.
+# Requires ~/Documents/src/libvorbis cloned and clang on PATH.
+regen-mdct-vectors:
+    mkdir -p tests/vectors/mdct
+    clang -O2 -ffp-contract=off -o tools/gen-vectors-mdct/harness \
+        tools/gen-vectors-mdct/harness.c \
+        ~/Documents/src/libvorbis/lib/mdct.c \
+        -I$HOME/Documents/src/libvorbis/lib \
+        -I$HOME/Documents/src/libvorbis/include \
+        -I/opt/homebrew/include \
+        -lm
+    cd tests/vectors/mdct && $PWD/../../../tools/gen-vectors-mdct/harness
+    rm tools/gen-vectors-mdct/harness
+
 # Headless wasm parity check (uses wasm-pack + a node runtime).
 wasm-test:
     wasm-pack test --node
