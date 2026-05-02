@@ -133,4 +133,65 @@ mod tests {
         assert_eq!(w.bit_len(), 4);
         assert_eq!(w.into_bytes(), vec![0x0F]);
     }
+
+    /// LSB-first bit reader — only used inside this test module to round-trip
+    /// against `BitWriter`. Not part of the public API.
+    struct BitReader<'a> {
+        bytes: &'a [u8],
+        bit_pos: usize,
+    }
+
+    impl<'a> BitReader<'a> {
+        fn new(bytes: &'a [u8]) -> Self {
+            Self { bytes, bit_pos: 0 }
+        }
+
+        fn read(&mut self, bits: u32) -> u32 {
+            let mut acc: u32 = 0;
+            for i in 0..bits {
+                let byte = self.bytes[self.bit_pos / 8];
+                let bit = (byte >> (self.bit_pos % 8)) & 1;
+                acc |= (bit as u32) << i;
+                self.bit_pos += 1;
+            }
+            acc
+        }
+    }
+
+    #[test]
+    fn round_trip_against_hand_rolled_reader() {
+        let cases: Vec<(u32, u32)> = vec![
+            (0, 0),
+            (0b1, 1),
+            (0b101, 3),
+            (0xA, 4),
+            (0x5A, 8),
+            (0x1234, 16),
+            (0xDEADBEEF, 32),
+            (0b1, 1),
+            (0b11_1111_1111, 10),
+            (0, 7),
+            (0xFFFF_FFFF, 32),
+            (0xFF, 4),
+        ];
+
+        let mut w = BitWriter::new();
+        let mut total_bits = 0u32;
+        for (v, b) in &cases {
+            w.write(*v, *b);
+            total_bits += *b;
+        }
+        assert_eq!(w.bit_len(), total_bits as usize);
+
+        let bytes = w.into_bytes();
+        let mut r = BitReader::new(&bytes);
+        for (v, b) in &cases {
+            let got = r.read(*b);
+            let expected = if *b == 32 { *v } else { *v & ((1u32 << b) - 1) };
+            assert_eq!(
+                got, expected,
+                "round-trip mismatch for write({v:#x}, {b}): got {got:#x}, expected {expected:#x}"
+            );
+        }
+    }
 }
