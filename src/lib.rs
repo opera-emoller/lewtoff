@@ -15,6 +15,9 @@ mod tables;
 #[allow(dead_code)]
 mod setup_blob;
 
+#[allow(dead_code)]
+mod codebook;
+
 #[doc(hidden)]
 pub mod mdct;
 

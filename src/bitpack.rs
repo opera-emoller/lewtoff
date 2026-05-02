@@ -1,4 +1,4 @@
-//! LSB-first bit writer, per Vorbis I §2.1.4.
+//! LSB-first bit packer/unpacker, per Vorbis I §2.1.4.
 
 #[derive(Default)]
 pub(crate) struct BitWriter {
@@ -55,6 +55,55 @@ impl BitWriter {
             bits_remaining -= take;
             value >>= take;
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// BitReader
+// ---------------------------------------------------------------------------
+
+/// LSB-first bit reader, counterpart to [`BitWriter`].
+pub(crate) struct BitReader<'a> {
+    bytes: &'a [u8],
+    bit_pos: usize,
+}
+
+impl<'a> BitReader<'a> {
+    pub fn new(bytes: &'a [u8]) -> Self {
+        Self { bytes, bit_pos: 0 }
+    }
+
+    /// Read `bits` bits (LSB-first) and return as a `u32`. `bits` must be <= 32.
+    pub fn read(&mut self, bits: u32) -> u32 {
+        debug_assert!(bits <= 32, "bits must be <= 32, got {bits}");
+        let mut acc: u32 = 0;
+        for i in 0..bits {
+            let byte_idx = self.bit_pos / 8;
+            if byte_idx >= self.bytes.len() {
+                // past-end reads return 0xFFFF_FFFF in libvorbis — return max bits
+                // to signal EOF (callers check for -1 cast to long in C).
+                // Return the partial accumulation ORed with all-ones in remaining bits.
+                let remaining = bits - i;
+                acc |= ((1u32 << remaining) - 1) << i;
+                self.bit_pos += remaining as usize;
+                return acc;
+            }
+            let bit = (self.bytes[byte_idx] >> (self.bit_pos % 8)) & 1;
+            acc |= (bit as u32) << i;
+            self.bit_pos += 1;
+        }
+        acc
+    }
+
+    /// Read `bits` bits and sign-extend to `i32`.
+    pub fn read_signed(&mut self, bits: u32) -> i32 {
+        let v = self.read(bits);
+        if bits == 0 {
+            return 0;
+        }
+        // sign-extend
+        let shift = 32 - bits;
+        ((v << shift) as i32) >> shift
     }
 }
 
@@ -127,30 +176,8 @@ mod tests {
         assert_eq!(w.into_bytes(), vec![0x0F]);
     }
 
-    struct BitReader<'a> {
-        bytes: &'a [u8],
-        bit_pos: usize,
-    }
-
-    impl<'a> BitReader<'a> {
-        fn new(bytes: &'a [u8]) -> Self {
-            Self { bytes, bit_pos: 0 }
-        }
-
-        fn read(&mut self, bits: u32) -> u32 {
-            let mut acc: u32 = 0;
-            for i in 0..bits {
-                let byte = self.bytes[self.bit_pos / 8];
-                let bit = (byte >> (self.bit_pos % 8)) & 1;
-                acc |= (bit as u32) << i;
-                self.bit_pos += 1;
-            }
-            acc
-        }
-    }
-
     #[test]
-    fn round_trip_against_hand_rolled_reader() {
+    fn round_trip_against_reader() {
         let cases: Vec<(u32, u32)> = vec![
             (0, 0),
             (0b1, 1),
@@ -184,5 +211,42 @@ mod tests {
                 "round-trip mismatch for write({v:#x}, {b}): got {got:#x}, expected {expected:#x}"
             );
         }
+    }
+
+    #[test]
+    fn reader_read_zero_bits_returns_zero() {
+        let bytes = vec![0xFFu8];
+        let mut r = BitReader::new(&bytes);
+        assert_eq!(r.read(0), 0);
+    }
+
+    #[test]
+    fn reader_reads_lsb_first() {
+        // byte 0xA = 0b0000_1010 → bits: 0,1,0,1,0,0,0,0
+        let bytes = vec![0x0Au8];
+        let mut r = BitReader::new(&bytes);
+        assert_eq!(r.read(1), 0); // bit 0
+        assert_eq!(r.read(1), 1); // bit 1
+        assert_eq!(r.read(1), 0); // bit 2
+        assert_eq!(r.read(1), 1); // bit 3
+    }
+
+    #[test]
+    fn reader_read_signed_sign_extends() {
+        // Write 0b11111 (5 bits) = 31, sign-extended as i32 = -1
+        let mut w = BitWriter::new();
+        w.write(0b11111, 5);
+        let bytes = w.into_bytes();
+        let mut r = BitReader::new(&bytes);
+        assert_eq!(r.read_signed(5), -1);
+    }
+
+    #[test]
+    fn reader_read_signed_positive() {
+        let mut w = BitWriter::new();
+        w.write(0b01010, 5); // 10 in 5 bits
+        let bytes = w.into_bytes();
+        let mut r = BitReader::new(&bytes);
+        assert_eq!(r.read_signed(5), 10);
     }
 }
