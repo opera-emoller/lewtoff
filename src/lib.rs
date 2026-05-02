@@ -9,6 +9,9 @@
 #[allow(dead_code)]
 mod bitpack;
 
+#[allow(dead_code)]
+mod tables;
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum SampleRate {
     Hz44100,

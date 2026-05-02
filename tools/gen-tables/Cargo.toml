@@ -1,0 +1,9 @@
+[package]
+name = "gen-tables"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "gen-tables"
+path = "src/main.rs"

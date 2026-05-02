@@ -61,6 +61,12 @@ regen-setup-blob:
 regen-tables:
     cargo run --bin gen-tables
 
+# Regenerate src/tables/trig.rs from a fresh run of tools/gen-tables.
+# Must be run on a canonical host (macOS arm64) for byte-identical reproducibility.
+regen-trig-table:
+    cargo run -p gen-tables
+    cargo fmt --all
+
 # Headless wasm parity check (uses wasm-pack + a node runtime).
 wasm-test:
     wasm-pack test --node

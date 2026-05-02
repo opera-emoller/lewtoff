@@ -1,3 +1,6 @@
+[workspace]
+members = [".", "tools/gen-tables"]
+
 [package]
 name = "lewtoff"
 version = "0.1.0"
