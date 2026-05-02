@@ -55,7 +55,7 @@ parity-diff input rate channels:
 # Regenerate the embedded Q5 setup-header blob by extracting it from a
 # fresh ffmpeg-libvorbis encode of a 1-sample silence file.
 regen-setup-blob:
-    cargo run --bin gen-setup-blob
+    cargo run -p gen-setup-blob
 
 # Build the table generator and write src/tables/*.rs.
 regen-tables:

@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "tools/gen-tables"]
+members = [".", "tools/gen-tables", "tools/gen-setup-blob"]
 
 [package]
 name = "lewtoff"

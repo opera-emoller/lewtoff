@@ -12,6 +12,9 @@ mod bitpack;
 #[allow(dead_code)]
 mod tables;
 
+#[allow(dead_code)]
+mod setup_blob;
+
 #[doc(hidden)]
 pub mod mdct;
 

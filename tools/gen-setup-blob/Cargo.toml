@@ -1,0 +1,12 @@
+[package]
+name = "gen-setup-blob"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "gen-setup-blob"
+path = "src/main.rs"
+
+[dependencies]
+ogg = "0.9"
