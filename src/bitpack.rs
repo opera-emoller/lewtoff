@@ -109,4 +109,20 @@ mod tests {
         assert_eq!(w.bit_len(), 32);
         assert_eq!(w.into_bytes(), vec![0x78, 0x56, 0x34, 0x12]);
     }
+
+    #[test]
+    fn writing_zero_bits_is_a_noop() {
+        let mut w = BitWriter::new();
+        w.write(0xFFFF_FFFF, 0);
+        assert_eq!(w.bit_len(), 0);
+        assert_eq!(w.into_bytes(), Vec::<u8>::new());
+    }
+
+    #[test]
+    fn writing_zero_value_advances_position() {
+        let mut w = BitWriter::new();
+        w.write(0, 8);
+        assert_eq!(w.bit_len(), 8);
+        assert_eq!(w.into_bytes(), vec![0x00]);
+    }
 }
