@@ -501,6 +501,8 @@ int vorbis_analysis_wrote(vorbis_dsp_state *v, int vals){
 
     vorbis_analysis_buffer(v,ci->blocksizes[1]*3);
     v->eofflag=v->pcm_current;
+    fprintf(stderr,"LV_EOFFLAG_AT_WRITE0 eofflag=%ld pcm_current=%ld centerW=%ld\n",
+            (long)v->eofflag, (long)v->pcm_current, (long)v->centerW);
     v->pcm_current+=ci->blocksizes[1]*3;
 
     for(i=0;i<vi->channels;i++){
@@ -516,6 +518,31 @@ int vorbis_analysis_wrote(vorbis_dsp_state *v, int vals){
         /* run the predictor filter */
         vorbis_lpc_predict(lpc,v->pcm[i]+v->eofflag-order,order,
                            v->pcm[i]+v->eofflag,v->pcm_current-v->eofflag);
+
+        /* DEBUG: dump LPC coeffs + first 64 samples of post-extrap, hex */
+        {
+          long npred = v->pcm_current - v->eofflag;
+          fprintf(stderr,"LV_POSTEXTRAP_LPC ch=%d n_train=%ld order=%d coeffs:",
+                  i, n, order);
+          for(int z=0;z<order;z++){
+            union { float f; unsigned u; } v2; v2.f=lpc[z];
+            fprintf(stderr," 0x%08x", v2.u);
+          }
+          fprintf(stderr,"\n");
+          fprintf(stderr,"LV_POSTEXTRAP_OUT ch=%d n=%ld first64_bits:",i,npred);
+          for(int z=0;z<64 && z<npred;z++){
+            union { float f; unsigned u; } v2; v2.f=v->pcm[i][v->eofflag+z];
+            fprintf(stderr," 0x%08x", v2.u);
+          }
+          fprintf(stderr,"\n");
+          fprintf(stderr,"LV_POSTEXTRAP_OUT_LAST ch=%d last64_bits:",i);
+          long start = npred-64; if(start<0) start=0;
+          for(long z=start;z<npred;z++){
+            union { float f; unsigned u; } v2; v2.f=v->pcm[i][v->eofflag+z];
+            fprintf(stderr," 0x%08x", v2.u);
+          }
+          fprintf(stderr,"\n");
+        }
       }else{
         /* not enough data to extrapolate (unlikely to happen due to
            guarding the overlap, but bulletproof in case that

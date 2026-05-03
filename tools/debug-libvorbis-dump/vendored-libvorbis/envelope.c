@@ -116,7 +116,20 @@ static int _ve_amp(envelope_lookup *ve,
  /* window and transform */
   for(i=0;i<n;i++)
     vec[i]=data[i]*ve->mdct_win[i];
+  /* DEBUG: dump windowed PCM input + MDCT output for steps 16-18 */
+  static int amp_call_count = -1;
+  amp_call_count++;
+  if (amp_call_count >= 32 && amp_call_count <= 38) { /* steps 16-18 stereo: each step = 2 calls */
+    fprintf(stderr,"C_AMP_DBG call=%d windowed_pcm_first16:", amp_call_count);
+    for (int z=0;z<16;z++){ union { float f; unsigned u; } v; v.f=vec[z]; fprintf(stderr," 0x%08x", v.u); }
+    fprintf(stderr,"\n");
+  }
   mdct_forward(&ve->mdct,vec,vec);
+  if (amp_call_count >= 32 && amp_call_count <= 38) {
+    fprintf(stderr,"C_AMP_DBG call=%d mdct_out_first16:", amp_call_count);
+    for (int z=0;z<16;z++){ union { float f; unsigned u; } v; v.f=vec[z]; fprintf(stderr," 0x%08x", v.u); }
+    fprintf(stderr,"\n");
+  }
 
   /*_analysis_output_always("mdct",seq2,vec,n/2,0,1,0); */
 
@@ -124,6 +137,12 @@ static int _ve_amp(envelope_lookup *ve,
      psychoacoustics, just sidelobe leakage and window size */
   {
     float temp=vec[0]*vec[0]+.7*vec[1]*vec[1]+.2*vec[2]*vec[2];
+    if (amp_call_count < 50) {
+      union { float f; unsigned u; } v0,v1,v2,vt;
+      v0.f=vec[0]; v1.f=vec[1]; v2.f=vec[2]; vt.f=temp;
+      fprintf(stderr,"C_NEARDC call=%d v0=0x%08x v1=0x%08x v2=0x%08x temp=0x%08x\n",
+              amp_call_count, v0.u, v1.u, v2.u, vt.u);
+    }
     int ptr=filters->nearptr;
 
     /* the accumulation is regularly refreshed from scratch to avoid
@@ -138,15 +157,24 @@ static int _ve_amp(envelope_lookup *ve,
     filters->nearDC_acc-=filters->nearDC[ptr];
     filters->nearDC[ptr]=temp;
 
+    float decay_pre_scale = decay;
     decay*=(1./(VE_NEARDC+1));
+    float decay_scaled_dbg = decay;
     filters->nearptr++;
     if(filters->nearptr>=VE_NEARDC)filters->nearptr=0;
     decay=todB(&decay)*.5-15.f;
+    if (amp_call_count < 40) {
+      union { float f; unsigned u; } v0,v1,v2,v3,v4;
+      v0.f=decay_pre_scale; v1.f=decay_scaled_dbg; v2.f=decay; v3.f=filters->nearDC_acc; v4.f=filters->nearDC_partialacc;
+      fprintf(stderr,"C_DECAY call=%d decay_in=0x%08x decay_scaled=0x%08x decay_db=0x%08x acc=0x%08x pacc=0x%08x\n",
+              amp_call_count, v0.u, v1.u, v2.u, v3.u, v4.u);
+    }
   }
 
   /* perform spreading and limiting, also smooth the spectrum.  yes,
      the MDCT results in all real coefficients, but it still *behaves*
      like real/imaginary pairs */
+  float decay_init_dbg = decay;
   for(i=0;i<n/2;i+=2){
     float val=vec[i]*vec[i]+vec[i+1]*vec[i+1];
     val=todB(&val)*.5f;
@@ -154,6 +182,13 @@ static int _ve_amp(envelope_lookup *ve,
     if(val<minV)val=minV;
     vec[i>>1]=val;
     decay-=8.;
+  }
+  if (amp_call_count >= 32 && amp_call_count <= 36) {
+    union { float f; unsigned u; } v;
+    v.f=decay_init_dbg;
+    fprintf(stderr,"C_SPREAD call=%d decay_init=0x%08x spread:", amp_call_count, v.u);
+    for (int k=0;k<16;k++){ v.f=vec[k]; fprintf(stderr," 0x%08x", v.u); }
+    fprintf(stderr,"\n");
   }
 
   /*_analysis_output_always("spread",seq2++,vec,n/4,0,0,0);*/
@@ -207,7 +242,7 @@ static int _ve_amp(envelope_lookup *ve,
 
     {
       static int n_band=0;
-      if(n_band<200){
+      if(n_band<2000){
         union { float f; unsigned u; } v;
         fprintf(stderr,"C_AMP band=%ld acc=0x%08x postmax=0x%08x premax=0x%08x valmax=%.6f thresh=%.6f stretch=%d\n",
           j,
