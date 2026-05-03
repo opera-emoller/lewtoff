@@ -452,6 +452,33 @@ mod tests {
     }
 }
 
+/// Reproduce libvorbis's `_ve_envelope_mark` for a short block.
+///
+/// For a short block at `center_w`, scan the marks vector in
+/// `[centerW - bs[0]/2, centerW + bs[0]/2)` = `[centerW-128, centerW+128)`.
+/// Any mark in that window → block is IMPULSE (returns true). No mark →
+/// PADDING (returns false). Long blocks don't use this — their type is
+/// determined by lW/nW.
+pub fn short_is_impulse(marks: &[bool], curmark: i64, center_w: i64) -> bool {
+    let bs0 = SHORT_BLOCK as i64;
+    let step = ENV_SEARCHSTEP as i64;
+    let begin_w = center_w - bs0 / 4 - bs0 / 4;
+    let end_w = center_w + bs0 / 4 + bs0 / 4;
+    // libvorbis fast path: if a recently-set curmark falls in the range,
+    // immediately classify as IMPULSE.
+    if curmark >= begin_w && curmark < end_w {
+        return true;
+    }
+    let first = (begin_w / step).max(0) as usize;
+    let last = ((end_w / step).max(0) as usize).min(marks.len());
+    for i in first..last {
+        if marks[i] {
+            return true;
+        }
+    }
+    false
+}
+
 /// Count how many short blocks libvorbis would emit at the start of the
 /// stream. For our constrained input space (silence / sine / ramp), this is
 /// either 1 (no transient detected past the leading-edge ampbuf-init noise)
@@ -484,7 +511,13 @@ pub fn n_short_blocks_at_start(marks: &[bool]) -> usize {
 /// (insufficient data, defer).
 ///
 /// Returns (nW, new_cursor). nW: 0=short, 1=long, -1=insufficient.
-pub fn next_w(marks: &[bool], cursor: i64, center_w: i64, w: i32) -> (i32, i64) {
+pub fn next_w(
+    marks: &[bool],
+    cursor: i64,
+    curmark_in: i64,
+    center_w: i64,
+    w: i32,
+) -> (i32, i64, i64) {
     let bs0 = SHORT_BLOCK as i64;
     let bs1 = LONG_BLOCK as i64;
     let step = ENV_SEARCHSTEP as i64;
@@ -495,20 +528,18 @@ pub fn next_w(marks: &[bool], cursor: i64, center_w: i64, w: i32) -> (i32, i64) 
 
     while j < limit - step {
         if j >= test_w {
-            return (1, j);
+            return (1, j, curmark_in);
         }
         let idx = (j / step) as usize;
         if idx < marks.len() && marks[idx] && j > center_w {
-            // Mark found in (centerW, testW). Per libvorbis, double-check
-            // testW one more time (the C code repeats the check).
             if j >= test_w {
-                return (1, j);
+                return (1, j, curmark_in);
             }
-            return (0, j);
+            return (0, j, j);
         }
         j += step;
     }
-    (-1, j)
+    (-1, j, curmark_in)
 }
 
 /// Pre-compute the W-flag pattern for the entire stream.
@@ -519,26 +550,38 @@ pub fn next_w(marks: &[bool], cursor: i64, center_w: i64, w: i32) -> (i32, i64) 
 /// `n_samples` includes any post-extrapolated tail (so blocks past EOS are
 /// also decided).
 pub fn full_w_pattern(marks: &[bool], n_samples: i64) -> Vec<i32> {
+    let (pattern, _) = full_w_pattern_with_curmark(marks, n_samples);
+    pattern
+}
+
+/// Same as [`full_w_pattern`] but also returns the per-block `curmark`
+/// position (in env-mark space) — needed for `_ve_envelope_mark` IMPULSE
+/// vs PADDING decisions.
+pub fn full_w_pattern_with_curmark(marks: &[bool], n_samples: i64) -> (Vec<i32>, Vec<i64>) {
     let bs0 = SHORT_BLOCK as i64;
     let bs1 = LONG_BLOCK as i64;
 
     // Initial state mirrors libvorbis init:
     //   v->W = 0, v->lW = 0, v->nW = 0, v->centerW = bs1/2 = 1024
-    //   ve->cursor = bs1/2 = 1024
+    //   ve->cursor = bs1/2 = 1024, ve->curmark = 0 (calloc'd init)
     let mut center_w: i64 = bs1 / 2;
     let mut cursor: i64 = bs1 / 2;
+    let mut curmark: i64 = 0;
     let mut w: i32 = 0;
 
     let mut pattern: Vec<i32> = Vec::new();
+    let mut curmarks: Vec<i64> = Vec::new();
     pattern.push(0); // first block is always short (W=0 in init)
+    curmarks.push(curmark);
 
     loop {
         // Decide next block's W. If next_w returns -1 (insufficient data /
         // no upcoming mark), default to long (= what libvorbis settles on
         // once data accumulates). At true EOS the last block becomes short
         // via the same default — see how libvorbis sets nW=0 at eofflag.
-        let (next, new_cursor) = next_w(marks, cursor, center_w, w);
+        let (next, new_cursor, new_curmark) = next_w(marks, cursor, curmark, center_w, w);
         cursor = new_cursor;
+        curmark = new_curmark;
         let nw = if next == -1 { 1 } else { next };
 
         // Advance centerW by bs[W]/4 + bs[nW]/4.
@@ -547,6 +590,7 @@ pub fn full_w_pattern(marks: &[bool], n_samples: i64) -> Vec<i32> {
 
         // Emit the next block (with the new W flag).
         pattern.push(nw);
+        curmarks.push(curmark);
 
         // Stop when centerW has advanced past the audio.
         if new_center_w >= n_samples {
@@ -557,7 +601,7 @@ pub fn full_w_pattern(marks: &[bool], n_samples: i64) -> Vec<i32> {
         w = nw;
     }
 
-    pattern
+    (pattern, curmarks)
 }
 
 /// Old, simplified pattern extractor — kept for reference.

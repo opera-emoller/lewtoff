@@ -371,7 +371,6 @@ fn make_q5_psy_impulse(rate: i64) -> VorbisInfoPsy {
 // Compand: _psy_compand_44[2] "mode A short" (via _psy_compand_short_mapping[6]=2.0)
 // ---------------------------------------------------------------------------
 
-#[allow(dead_code)]
 fn make_q5_psy_short(rate: i64) -> VorbisInfoPsy {
     let _ = rate;
 
@@ -750,6 +749,8 @@ pub(crate) fn encode_with_serial_and_meta(
     let psy_look_transition: VorbisLookPsy = vp_psy_init(vi_transition, &gi, HALF_BLOCK, rate_hz);
     let vi_short = make_q5_psy_impulse(rate_hz);
     let psy_look_short: VorbisLookPsy = vp_psy_init(vi_short, &gi, SHORT_HALF, rate_hz);
+    let vi_padding = make_q5_psy_short(rate_hz);
+    let psy_look_padding: VorbisLookPsy = vp_psy_init(vi_padding, &gi, SHORT_HALF, rate_hz);
 
     // De-interleave input into per-channel buffers
     let total_samples = if ch > 1 {
@@ -785,7 +786,7 @@ pub(crate) fn encode_with_serial_and_meta(
     // libvorbis's envelope-driven `_ve_envelope_search` rule across all
     // marks. The pattern is a Vec<i32> of 0=short / 1=long, one entry per
     // emitted block (including any EOS flush blocks).
-    let block_w: Vec<i32> = {
+    let (block_w, env_marks, block_curmarks): (Vec<i32>, Vec<bool>, Vec<i64>) = {
         let lpc_train_end = 2112usize.min(total_samples);
         let mut env_pcm: Vec<Vec<f32>> = Vec::with_capacity(ch);
         for c in 0..ch {
@@ -798,8 +799,9 @@ pub(crate) fn encode_with_serial_and_meta(
             env_pcm.push(buf);
         }
         let marks = crate::envelope::compute_marks(&env_pcm, &gi);
-        // n_samples for the pattern is the buffer length (LPC pre + audio).
-        crate::envelope::full_w_pattern(&marks, env_pcm[0].len() as i64)
+        let (pattern, curmarks) =
+            crate::envelope::full_w_pattern_with_curmark(&marks, env_pcm[0].len() as i64);
+        (pattern, marks, curmarks)
     };
 
     // Map W-flag sequence to per-block sample positions (block_start). Each
@@ -831,6 +833,28 @@ pub(crate) fn encode_with_serial_and_meta(
         }
         starts
     };
+
+    // Per-short-block IMPULSE vs PADDING decision (libvorbis _ve_envelope_mark).
+    // A short block is IMPULSE if any envelope mark falls within centerW±bs/2.
+    // centerW for envelope-mark space includes the LPC pre-extrap offset
+    // (CENTER_W = 1024 samples).
+    let block_is_impulse: Vec<bool> = block_starts
+        .iter()
+        .zip(block_w.iter())
+        .zip(block_curmarks.iter())
+        .map(|((&start, &w), &curmark)| {
+            if w != 0 {
+                false // long blocks don't use impulse/padding distinction
+            } else {
+                // centerW in env-marks space = audio block_start + LPC pre
+                // offset (CENTER_W). block_start is where current-half begins,
+                // which is the boundary between left and right halves =
+                // libvorbis centerW.
+                let center_w_in_env = (start + CENTER_W) as i64;
+                crate::envelope::short_is_impulse(&env_marks, curmark, center_w_in_env)
+            }
+        })
+        .collect();
     let total_blocks = block_w.len();
 
     // OGG writer
@@ -1042,9 +1066,21 @@ pub(crate) fn encode_with_serial_and_meta(
         } else {
             long_mapping
         };
+        // libvorbis: BLOCKTYPE_IMPULSE (psy[0]) when short block has an
+        // envelope mark in its neighborhood; BLOCKTYPE_PADDING (psy[1])
+        // otherwise. BLOCKTYPE_TRANSITION (psy[2]) when long block has !lW
+        // or !nW; BLOCKTYPE_LONG (psy[3]) only when both lW and nW are long.
+        //
+        // The IMPULSE/PADDING distinction depends on envelope marks that
+        // require bit-precise _ve_amp output to match libvorbis. Since our
+        // port has 1-ULP precision deviations that shift mark positions,
+        // we use IMPULSE for now (matches libvorbis on sine/silence; gives
+        // slightly larger residue on ramp mid-stream short blocks).
+        let _ = block_is_impulse;
+        let _ = &psy_look_padding;
         let psy_look = if is_short {
             &psy_look_short
-        } else if block_mode.prev_window {
+        } else if block_mode.prev_window && block_mode.next_window {
             &psy_look_long
         } else {
             &psy_look_transition
