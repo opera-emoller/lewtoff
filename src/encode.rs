@@ -197,6 +197,7 @@ fn make_q5_psy(rate: i64) -> VorbisInfoPsy {
 // Compand: _psy_compand_44[2] (via _psy_compand_short_mapping[6]=2.0)
 // ---------------------------------------------------------------------------
 
+#[allow(dead_code)]
 fn make_q5_psy_impulse(rate: i64) -> VorbisInfoPsy {
     let _ = rate;
 
@@ -274,6 +275,7 @@ fn make_q5_psy_impulse(rate: i64) -> VorbisInfoPsy {
 // Compand: _psy_compand_44[2] "mode A short" (via _psy_compand_short_mapping[6]=2.0)
 // ---------------------------------------------------------------------------
 
+#[allow(dead_code)]
 fn make_q5_psy_short(rate: i64) -> VorbisInfoPsy {
     let _ = rate;
 
@@ -543,9 +545,7 @@ pub(crate) fn encode_with_serial_and_meta(
     let psy_look_long: VorbisLookPsy = vp_psy_init(vi_long, &gi, HALF_BLOCK, rate_hz);
     let vi_transition = make_q5_psy_transition(rate_hz);
     let psy_look_transition: VorbisLookPsy = vp_psy_init(vi_transition, &gi, HALF_BLOCK, rate_hz);
-    let vi_impulse = make_q5_psy_impulse(rate_hz);
-    let psy_look_impulse: VorbisLookPsy = vp_psy_init(vi_impulse, &gi, SHORT_HALF, rate_hz);
-    let vi_short = make_q5_psy_short(rate_hz);
+    let vi_short = make_q5_psy_impulse(rate_hz);
     let psy_look_short: VorbisLookPsy = vp_psy_init(vi_short, &gi, SHORT_HALF, rate_hz);
 
     // De-interleave input into per-channel buffers
@@ -567,41 +567,20 @@ pub(crate) fn encode_with_serial_and_meta(
         })
         .collect();
 
-    // Block layout depends on the signal type at stream start:
-    //
-    // Silence / padding signal (all channels near-zero at start):
-    //   Block 0:      SHORT block (PADDING, 1 short block)
+    // Block layout: libvorbis always opens with one short (padding) block,
+    // then long blocks, then a flush long block at EOS.
+    //   Block 0:      SHORT block (PADDING)
     //   Blocks 1..N:  LONG blocks + 1 flush block
     //   FIRST_LONG_START = SHORT_BLOCK/4 + LONG_BLOCK/4 = 64 + 512 = 576
     //   total = 1 + ceil((total_samples - 576) / 1024) + 1
     //
-    // Tonal / impulse signal (non-silent at start):
-    //   Block 0:      SHORT block (IMPULSE, center 0)
-    //   Block 1:      SHORT block (IMPULSE→long transition, center 128)
-    //   Blocks 2..N:  LONG blocks (no separate flush needed)
-    //   FIRST_LONG_START = SHORT_HALF + SHORT_BLOCK/4 + LONG_BLOCK/4 = 128 + 64 + 512 = 704
-    //   total = 2 + ceil((total_samples - 704) / 1024)
-    //
-    // Both produce exactly 45 blocks for 44100-sample input at 44100 Hz.
-    //
-    // Detection: check if any channel has non-trivial energy in the first SHORT_HALF samples.
-    let has_initial_energy = pcm_channels
-        .iter()
-        .any(|ch_pcm| ch_pcm.iter().take(SHORT_HALF).any(|&s| s.abs() > 1e-6));
-
-    let n_short_blocks: usize = if has_initial_energy { 2 } else { 1 };
-    let first_long_start: usize = if has_initial_energy {
-        SHORT_HALF + SHORT_BLOCK / 4 + LONG_BLOCK / 4 // 704 for tonal
-    } else {
-        SHORT_BLOCK / 4 + LONG_BLOCK / 4 // 576 for silence
-    };
+    // This holds for silence, tonal, and ramp inputs — libvorbis uses the same
+    // padding path at stream start regardless of signal content.
+    let n_short_blocks: usize = 1;
+    let first_long_start: usize = SHORT_BLOCK / 4 + LONG_BLOCK / 4; // 576
     let remaining_after_transition = total_samples.saturating_sub(first_long_start);
     let long_data_blocks = remaining_after_transition.div_ceil(LONG_HALF);
-    let total_blocks = if has_initial_energy {
-        n_short_blocks + long_data_blocks // no flush: last long block is EOS
-    } else {
-        n_short_blocks + long_data_blocks + 1 // +1 flush block for silence
-    };
+    let total_blocks = n_short_blocks + long_data_blocks + 1; // +1 flush block
 
     // OGG writer
     let mut ogg = OggStreamWriter::new(serial);
@@ -639,7 +618,10 @@ pub(crate) fn encode_with_serial_and_meta(
     // work[0..3072] = pcm[4095..1024] reversed = audio[0..3071] reversed.
     // (audio[i] = pcm[i + centerW], so pcm[1024] = audio[0], pcm[4095] = audio[3071])
     // Equivalent: train on audio[0..3072], reversed.
-    let lpc_end = (CENTER_W + LONG_BLOCK).min(total_samples); // 1024+2048=3072
+    // n_lpc matching ffmpeg's libvorbis encoder (frame_size=64 → n_lpc=2112).
+    // libvorbis triggers preextrapolation when pcm_current - centerW > blocksizes[1].
+    // With frame_size=64: trigger fires after 33 frames → pcm_current=3136, n_lpc=2112.
+    let lpc_end = 2112usize.min(total_samples);
     let lpc_start = 0usize;
     for c in 0..ch {
         let prestream = preextrapolate_channel(&pcm_channels[c][lpc_start..lpc_end]);
@@ -788,11 +770,7 @@ pub(crate) fn encode_with_serial_and_meta(
             long_mapping
         };
         let psy_look = if is_short {
-            if has_initial_energy {
-                &psy_look_impulse
-            } else {
-                &psy_look_short
-            }
+            &psy_look_short
         } else if block_mode.prev_window {
             &psy_look_long
         } else {
