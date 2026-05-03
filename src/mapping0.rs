@@ -13,7 +13,7 @@
 
 use crate::bitpack::BitWriter;
 use crate::floor1::{floor1_encode, floor1_fit, Floor1State};
-use crate::mdct::mdct_forward;
+use crate::mdct::{mdct_forward_long, mdct_forward_short};
 use crate::psy::{
     to_db, vp_ampmax_decay, vp_noisemask, vp_offset_and_mix, vp_tonemask, VorbisInfoPsyGlobal,
     VorbisLookPsy,
@@ -22,10 +22,7 @@ use crate::residue::{
     res1_class, res1_forward, res2_class, res2_forward, ResidueLook, ResidueSetup,
 };
 use crate::setup::Mapping;
-use crate::window::{BLOCK_SIZE, HALF_BLOCK};
-
-pub(crate) const N: usize = BLOCK_SIZE; // 2048
-pub(crate) const N2: usize = HALF_BLOCK; // 1024
+use crate::window::{LONG_BLOCK, LONG_HALF, SHORT_BLOCK, SHORT_HALF};
 
 // ---------------------------------------------------------------------------
 // mapping0_forward
@@ -46,8 +43,20 @@ pub(crate) const N2: usize = HALF_BLOCK; // 1024
 //   opb          - output bit writer
 // ---------------------------------------------------------------------------
 
+/// Parameters for mode/window flags in the audio packet header.
+pub(crate) struct BlockMode {
+    pub mode_number: usize,
+    pub modebits: u32,
+    /// Is this a long block? (false = short block, n=256)
+    pub is_long: bool,
+    /// Was the previous block long? (only written for long blocks)
+    pub prev_window: bool,
+    /// Is the next block long? (only written for long blocks)
+    pub next_window: bool,
+}
+
 pub(crate) fn mapping0_forward(
-    pcm_blocks: &[[f32; N]], // per-channel raw (not-yet-windowed) PCM, length channels
+    pcm_blocks: &[Vec<f32>], // per-channel windowed PCM, variable length (256 or 2048)
     psy_look: &VorbisLookPsy,
     gi: &VorbisInfoPsyGlobal,
     ampmax: &mut f32,
@@ -56,13 +65,16 @@ pub(crate) fn mapping0_forward(
     residue_setups: &[ResidueSetup],
     residue_looks: &[ResidueLook],
     mapping: &Mapping,
-    mode_number: usize,
-    modebits: u32,
+    block_mode: &BlockMode,
     books: &[crate::codebook::Codebook],
     opb: &mut BitWriter,
 ) {
-    let n = N;
-    let n2 = N2;
+    let n = if block_mode.is_long {
+        LONG_BLOCK
+    } else {
+        SHORT_BLOCK
+    };
+    let n2 = n / 2;
     let channels = pcm_blocks.len();
 
     // Scale factor for dB computation (port of `scale = 4.f/n; scale_dB = todB(&scale) + .345`)
@@ -70,7 +82,7 @@ pub(crate) fn mapping0_forward(
     let scale_dB = to_db(scale) + 0.345_f32;
 
     // Per-channel MDCT output (gmdct)
-    let mut gmdct: Vec<[f32; N2]> = vec![[0.0f32; N2]; channels];
+    let mut gmdct: Vec<Vec<f32>> = vec![vec![0.0f32; n2]; channels];
 
     // Per-channel log-FFT approximation (logfft, overlaid on pcm scratch)
     let mut logfft: Vec<Vec<f32>> = vec![vec![0.0f32; n2]; channels];
@@ -81,9 +93,24 @@ pub(crate) fn mapping0_forward(
     // Apply window (already done by caller), MDCT, and compute log-FFT approx
     // Port of: lines 254-360 in mapping0.c
     for i in 0..channels {
-        // MDCT
-        let pcm_arr: &[f32; N] = &pcm_blocks[i];
-        mdct_forward(pcm_arr, &mut gmdct[i]);
+        // MDCT — dispatch on block size
+        if block_mode.is_long {
+            let pcm_arr: &[f32; LONG_BLOCK] = pcm_blocks[i]
+                .as_slice()
+                .try_into()
+                .expect("long block size");
+            let mut out = [0.0f32; LONG_HALF];
+            mdct_forward_long(pcm_arr, &mut out);
+            gmdct[i].copy_from_slice(&out);
+        } else {
+            let pcm_arr: &[f32; SHORT_BLOCK] = pcm_blocks[i]
+                .as_slice()
+                .try_into()
+                .expect("short block size");
+            let mut out = [0.0f32; SHORT_HALF];
+            mdct_forward_short(pcm_arr, &mut out);
+            gmdct[i].copy_from_slice(&out);
+        }
 
         // Log magnitude spectrum from the windowed PCM (FFT approximation).
         // libvorbis calls drft_forward then logs. We approximate by using
@@ -126,7 +153,7 @@ pub(crate) fn mapping0_forward(
     let mut tone_bufs: Vec<Vec<f32>> = vec![vec![0.0f32; n2]; channels];
 
     // We need gmdct_copy for use after the loop (psy modifies it in vp_offset_and_mix)
-    let mut gmdct_work: Vec<Vec<f32>> = gmdct.iter().map(|a| a.to_vec()).collect();
+    let mut gmdct_work: Vec<Vec<f32>> = gmdct.clone();
 
     for i in 0..channels {
         let submap = mapping.chmuxlist[i];
@@ -175,13 +202,13 @@ pub(crate) fn mapping0_forward(
     // Encode packet type (audio = 0)
     opb.write(0, 1);
     // Encode mode number
-    opb.write(mode_number as u32, modebits);
-    // For long block (W=1), encode lW and nW window flags
-    // Since we only have long blocks: lW=1, nW=1
-    // The C does: if(vb->W) { oggpack_write(opb,vb->lW,1); oggpack_write(opb,vb->nW,1); }
-    // For our fixed long-block-only case we always write them
-    opb.write(1, 1); // lW = 1 (previous block is long)
-    opb.write(1, 1); // nW = 1 (next block is long)
+    opb.write(block_mode.mode_number as u32, block_mode.modebits);
+    // For long blocks (W=1): encode lW and nW window flags.
+    // For short blocks (W=0): no window flags (the C code: if(vb->W) {...}).
+    if block_mode.is_long {
+        opb.write(if block_mode.prev_window { 1 } else { 0 }, 1);
+        opb.write(if block_mode.next_window { 1 } else { 0 }, 1);
+    }
 
     // Per-channel ilogmask (integer quantized floor)
     let mut iwork: Vec<Vec<i32>> = vec![vec![0i32; n2]; channels];
@@ -205,7 +232,8 @@ pub(crate) fn mapping0_forward(
     // Couple + quantize + normalize
     // Use blobno = PACKETBLOBS/2 = 7 (nominal quality blob)
     let blobno = crate::psy::PACKETBLOBS / 2;
-    let sliding_lowpass = gi.sliding_lowpass[1][blobno]; // [W=1][blobno]
+    let w_flag = if block_mode.is_long { 1 } else { 0 };
+    let sliding_lowpass = gi.sliding_lowpass[w_flag][blobno];
 
     crate::psy::vp_couple_quantize_normalize(
         blobno,

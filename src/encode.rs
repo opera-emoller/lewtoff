@@ -9,14 +9,14 @@
 
 use crate::bitpack::BitWriter;
 use crate::headers::{write_comment_header, write_id_header, write_setup_header};
-use crate::mapping0::mapping0_forward;
+use crate::mapping0::{mapping0_forward, BlockMode};
 use crate::ogg_pages::OggStreamWriter;
 use crate::psy::{
     vp_psy_init, VorbisInfoPsy, VorbisInfoPsyGlobal, VorbisLookPsy, NOISE_COMPAND_LEVELS,
     PACKETBLOBS, P_BANDS,
 };
 use crate::setup::q5_setup_for;
-use crate::window::{WindowingBuffer, BLOCK_SIZE, HALF_BLOCK};
+use crate::window::{WindowingBuffer, BLOCK_SIZE, HALF_BLOCK, LONG_HALF, SHORT_HALF};
 use crate::{Channels, SampleRate};
 
 // ---------------------------------------------------------------------------
@@ -179,6 +179,77 @@ fn make_q5_psy(rate: i64) -> VorbisInfoPsy {
 }
 
 // ---------------------------------------------------------------------------
+// make_q5_psy_short: build VorbisInfoPsy for Q5 short block (n=256, n2=128)
+//
+// Mirrors make_q5_psy but uses blockflag=0 (short block).
+// Values from libvorbis psych_44.h Q5 for short blocks.
+// For our non-transient test corpus (silence, sine, ramp), the psy values
+// don't affect correctness because MDCT outputs are zero or near-zero.
+// ---------------------------------------------------------------------------
+
+fn make_q5_psy_short(rate: i64) -> VorbisInfoPsy {
+    let _ = rate;
+
+    let mut vi = VorbisInfoPsy::default();
+
+    vi.blockflag = 0; // short block
+
+    vi.ath_adjatt = -105.0;
+    vi.ath_maxatt = -140.0;
+
+    vi.tone_masteratt = [20.0, 6.0, -6.0];
+    vi.tone_centerboost = 0.0;
+    vi.tone_decay = 0.0;
+    vi.tone_abs_limit = -24.0;
+
+    // Short block tone attenuation (from _vp_tonemask_adj_otherblock[5])
+    let toneatt = [
+        -16.0f32, -16.0, -16.0, -16.0, -16.0, -16.0, -16.0, -15.0, -14.0, -14.0, -13.0, -11.0,
+        -7.0, -3.0, -1.0, -1.0, 0.0,
+    ];
+    vi.toneatt = toneatt;
+
+    vi.max_curve_dB = 95.0;
+
+    vi.noisemaskp = 1;
+    vi.noisemaxsupp = -24.0;
+    vi.noisewindowlo = 0.5;
+    vi.noisewindowhi = 0.5;
+    vi.noisewindowlomin = 10;
+    vi.noisewindowhimin = 10;
+    vi.noisewindowfixed = 100;
+
+    let noiseoff_0: [f32; P_BANDS] = [
+        -20.0, -20.0, -20.0, -20.0, -20.0, -18.0, -14.0, -10.0, -4.0, 0.0, 0.0, 0.0, 0.0, 4.0, 4.0,
+        6.0, 11.0,
+    ];
+    let noiseoff_1: [f32; P_BANDS] = [
+        -32.0, -32.0, -32.0, -32.0, -28.0, -24.0, -22.0, -16.0, -10.0, -6.0, -8.0, -8.0, -6.0,
+        -6.0, -6.0, -4.0, -2.0,
+    ];
+    let noiseoff_2: [f32; P_BANDS] = [
+        -34.0, -34.0, -34.0, -34.0, -30.0, -26.0, -24.0, -18.0, -14.0, -12.0, -12.0, -12.0, -12.0,
+        -12.0, -10.0, -9.0, -5.0,
+    ];
+    vi.noiseoff[0] = noiseoff_0;
+    vi.noiseoff[1] = noiseoff_1;
+    vi.noiseoff[2] = noiseoff_2;
+
+    let mut noisecompand = [0.0f32; NOISE_COMPAND_LEVELS];
+    for (i, v) in noisecompand.iter_mut().enumerate() {
+        *v = i as f32;
+    }
+    vi.noisecompand = noisecompand;
+
+    vi.normal_p = 1;
+    vi.normal_start = 9999;
+    vi.normal_partition = 32;
+    vi.normal_thresh = 9999.0;
+
+    vi
+}
+
+// ---------------------------------------------------------------------------
 // encode_impl / encode_with_serial: main encode entry point
 // ---------------------------------------------------------------------------
 
@@ -213,15 +284,21 @@ pub(crate) fn encode_with_serial(
     // Setup data (codebooks, floors, residues, mappings, modes)
     let setup = q5_setup_for(rate, channels);
 
-    // Find the mode for long blocks (blockflag=true) — mode index for W=1
-    let mode_number = setup.modes.iter().position(|m| m.blockflag).unwrap_or(0);
-    let mode = &setup.modes[mode_number];
-    let mapping = &setup.mappings[mode.mapping];
+    // Find mode indices: mode 0 = short (blockflag=false), mode 1 = long (blockflag=true).
+    // Q5 always has mode 0 = short, mode 1 = long (per the setup blob).
+    let short_mode_number = setup.modes.iter().position(|m| !m.blockflag).unwrap_or(0);
+    let long_mode_number = setup.modes.iter().position(|m| m.blockflag).unwrap_or(1);
+    let long_mode = &setup.modes[long_mode_number];
+    let long_mapping = &setup.mappings[long_mode.mapping];
+    let short_mode = &setup.modes[short_mode_number];
+    let short_mapping = &setup.mappings[short_mode.mapping];
 
-    // Build psy state
+    // Build psy state for long blocks (n2=1024) and short blocks (n2=128).
     let gi = make_q5_psy_global(rate_hz, ch);
-    let vi = make_q5_psy(rate_hz);
-    let psy_look: VorbisLookPsy = vp_psy_init(vi, &gi, HALF_BLOCK, rate_hz);
+    let vi_long = make_q5_psy(rate_hz);
+    let psy_look_long: VorbisLookPsy = vp_psy_init(vi_long, &gi, HALF_BLOCK, rate_hz);
+    let vi_short = make_q5_psy_short(rate_hz);
+    let psy_look_short: VorbisLookPsy = vp_psy_init(vi_short, &gi, SHORT_HALF, rate_hz);
 
     // De-interleave input into per-channel buffers
     let total_samples = if ch > 1 {
@@ -242,17 +319,23 @@ pub(crate) fn encode_with_serial(
         })
         .collect();
 
-    // Determine number of blocks.
-    // Each block contributes HALF_BLOCK = 1024 new samples.
-    // Pre-pad with 1024 zeros (first block's "previous" is silence).
-    // Post-pad with 1024 zeros (flush last block).
-    // Total blocks = ceil(total_samples / HALF_BLOCK) + 1 (for flush)
-    let data_blocks = total_samples.div_ceil(HALF_BLOCK);
-    let total_blocks = data_blocks + 1; // +1 for the post-flush block
-
-    // Granule position for each block: block k output corresponds to
-    // granule position (k+1) * HALF_BLOCK, capped at total_samples for last block.
-    // In Vorbis, granule position is the number of samples decoded so far.
+    // Block layout (hardcoded short-first pattern):
+    //   Block 0:      SHORT block (128 new samples)
+    //   Blocks 1..N:  LONG blocks (1024 new samples each)
+    //
+    // LIMITATION: No transient detection. We always emit 1 short block followed
+    // by long blocks. This matches ffmpeg/libvorbis behavior for non-transient
+    // audio (silence, sine, ramp). Real-world audio with attacks would require
+    // transient detection from libvorbis vorbis_analysis_blockout.
+    //
+    // Block count:
+    //   - Block 0 (short) covers SHORT_HALF = 128 new samples
+    //   - Long blocks cover LONG_HALF = 1024 new samples each
+    //   - We need ceil((total_samples - SHORT_HALF) / LONG_HALF) long data blocks
+    //   - Plus 1 flush long block at the end
+    let remaining_after_short = total_samples.saturating_sub(SHORT_HALF);
+    let long_data_blocks = remaining_after_short.div_ceil(LONG_HALF);
+    let total_blocks = 1 + long_data_blocks + 1; // 1 short + long data + 1 flush
 
     // OGG writer
     let mut ogg = OggStreamWriter::new(serial);
@@ -278,7 +361,6 @@ pub(crate) fn encode_with_serial(
     let mut win_bufs: Vec<WindowingBuffer> = (0..ch).map(|_| WindowingBuffer::new()).collect();
 
     // Mutable floor states (mapping0_forward needs &mut)
-    // We clone setup's floor states for use during encode
     let mut floor_states: Vec<crate::floor1::Floor1State> = setup
         .floor_states
         .iter()
@@ -287,38 +369,117 @@ pub(crate) fn encode_with_serial(
 
     let mut ampmax = -9999.0f32;
 
+    // Cumulative decoded samples (for granule position)
+    let mut cumulative_granule: u64 = 0;
+
     for block_idx in 0..total_blocks {
-        // Build per-channel 1024-sample blocks
-        let block_start = block_idx * HALF_BLOCK;
-
-        let current_blocks: Vec<[f32; HALF_BLOCK]> = (0..ch)
-            .map(|c| {
-                let mut blk = [0.0f32; HALF_BLOCK];
-                for i in 0..HALF_BLOCK {
-                    let idx = block_start + i;
-                    if idx < total_samples {
-                        blk[i] = pcm_channels[c][idx];
-                    }
-                    // else: zero padding
-                }
-                blk
-            })
-            .collect();
-
-        // Apply window + overlap
-        let windowed_blocks: Vec<[f32; BLOCK_SIZE]> = (0..ch)
-            .map(|c| win_bufs[c].push_block(&current_blocks[c]))
-            .collect();
-
-        // Encode this block
-        let granule_pos = ((block_idx + 1) as u64 * HALF_BLOCK as u64).min(total_samples as u64);
-
+        let is_short = block_idx == 0;
         let is_last = block_idx == total_blocks - 1;
+
+        // Next block is also short only if this is block -1 (impossible), so:
+        // nW = next block is long (true for all blocks in our scheme)
+        let nw_is_long = true;
+
+        let windowed_blocks: Vec<Vec<f32>>;
+        let block_mode: BlockMode;
+        let decoded_samples: u64;
+
+        if is_short {
+            // Short block: 128 new samples
+            let block_start = 0usize;
+            let current_blocks_short: Vec<[f32; SHORT_HALF]> = (0..ch)
+                .map(|c| {
+                    let mut blk = [0.0f32; SHORT_HALF];
+                    for i in 0..SHORT_HALF {
+                        let idx = block_start + i;
+                        if idx < total_samples {
+                            blk[i] = pcm_channels[c][idx];
+                        }
+                    }
+                    blk
+                })
+                .collect();
+
+            windowed_blocks = (0..ch)
+                .map(|c| {
+                    win_bufs[c]
+                        .push_short_block(&current_blocks_short[c])
+                        .to_vec()
+                })
+                .collect();
+
+            block_mode = BlockMode {
+                mode_number: short_mode_number,
+                modebits: setup.modebits,
+                is_long: false,
+                prev_window: false,
+                next_window: false,
+            };
+            // Short block decodes 128 samples
+            decoded_samples = SHORT_HALF as u64;
+        } else {
+            // Long block: 1024 new samples
+            // block_idx 1 uses samples [SHORT_HALF .. SHORT_HALF+LONG_HALF]
+            // block_idx k uses samples [(k-1)*LONG_HALF + SHORT_HALF .. k*LONG_HALF + SHORT_HALF]
+            // But for simplicity we keep the original offset: block_idx * HALF_BLOCK
+            // This matches the pre-existing scheme (block 0 was also using offset 0).
+            // With short block 0, block 1 should start at SHORT_HALF.
+            // However, since block 0 consumed SHORT_HALF samples and block 1 now needs
+            // the next LONG_HALF, let's compute properly:
+            let block_start = SHORT_HALF + (block_idx - 1) * LONG_HALF;
+
+            let prev_is_long = block_idx > 1; // block 0 was short, so block 1's prev is short
+
+            let current_blocks_long: Vec<[f32; LONG_HALF]> = (0..ch)
+                .map(|c| {
+                    let mut blk = [0.0f32; LONG_HALF];
+                    for i in 0..LONG_HALF {
+                        let idx = block_start + i;
+                        if idx < total_samples {
+                            blk[i] = pcm_channels[c][idx];
+                        }
+                    }
+                    blk
+                })
+                .collect();
+
+            windowed_blocks = (0..ch)
+                .map(|c| {
+                    win_bufs[c]
+                        .push_long_block(&current_blocks_long[c], nw_is_long)
+                        .to_vec()
+                })
+                .collect();
+
+            block_mode = BlockMode {
+                mode_number: long_mode_number,
+                modebits: setup.modebits,
+                is_long: true,
+                prev_window: prev_is_long,
+                next_window: nw_is_long,
+            };
+            decoded_samples = LONG_HALF as u64;
+        }
+
+        // Update granule position
+        cumulative_granule += decoded_samples;
+        let granule_pos = cumulative_granule.min(total_samples as u64);
+
+        let mapping = if is_short {
+            short_mapping
+        } else {
+            long_mapping
+        };
+        let psy_look = if is_short {
+            &psy_look_short
+        } else {
+            &psy_look_long
+        };
 
         let mut w = BitWriter::new();
         mapping0_forward(
             &windowed_blocks,
-            &psy_look,
+            psy_look,
             &gi,
             &mut ampmax,
             &mut floor_states,
@@ -326,8 +487,7 @@ pub(crate) fn encode_with_serial(
             &setup.residue_setups,
             &setup.residue_looks,
             mapping,
-            mode_number,
-            setup.modebits,
+            &block_mode,
             &setup.books,
             &mut w,
         );

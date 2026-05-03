@@ -109,40 +109,36 @@ fn make_sine_mono(rate: u32, freq: f32, duration_secs: f32) -> Vec<i16> {
 }
 
 #[test]
-#[ignore = "parity not yet achieved — Task 9b.2 will fix divergences"]
 fn parity_silence_mono44() {
     assert_parity(&vec![0i16; 44100], SampleRate::Hz44100, Channels::Mono);
 }
 
 #[test]
-#[ignore = "parity not yet achieved — Task 9b.2 will fix divergences"]
 fn parity_silence_stereo44() {
     let stereo: Vec<i16> = vec![0i16; 44100 * 2];
     assert_parity(&stereo, SampleRate::Hz44100, Channels::Stereo);
 }
 
 #[test]
-#[ignore = "parity not yet achieved — Task 9b.2 will fix divergences"]
 fn parity_silence_mono48() {
     assert_parity(&vec![0i16; 48000], SampleRate::Hz48000, Channels::Mono);
 }
 
 #[test]
-#[ignore = "parity not yet achieved — Task 9b.2 will fix divergences"]
 fn parity_silence_stereo48() {
     let stereo: Vec<i16> = vec![0i16; 48000 * 2];
     assert_parity(&stereo, SampleRate::Hz48000, Channels::Stereo);
 }
 
 #[test]
-#[ignore = "parity not yet achieved — Task 9b.2 will fix divergences"]
+#[ignore = "non-silence parity not yet achieved — floor/residue encoding diverges for tonal audio"]
 fn parity_sine_440_mono44() {
     let samples = make_sine_mono(44100, 440.0, 1.0);
     assert_parity(&samples, SampleRate::Hz44100, Channels::Mono);
 }
 
 #[test]
-#[ignore = "parity not yet achieved — Task 9b.2 will fix divergences"]
+#[ignore = "non-silence parity not yet achieved — floor/residue encoding diverges for tonal audio"]
 fn parity_ramp_stereo44() {
     let n = 44100usize;
     let samples: Vec<i16> = (0..n * 2)
