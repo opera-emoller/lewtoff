@@ -128,5 +128,12 @@ debug-dump-c:
     $TOOL/harness
     echo "dumps in /tmp/lewtoff-debug/c_*"
 
+debug-dump-rust:
+    LEWTOFF_DEBUG_DUMP=1 cargo run --bin debug-rust-dump
+    echo "dumps in /tmp/lewtoff-debug/r_*"
+
+debug-diff: debug-dump-rust
+    cargo run --bin debug-diff
+
 clean:
     cargo clean

@@ -9,6 +9,8 @@
 #[allow(dead_code)]
 mod tables;
 
+mod debug_dump;
+
 #[allow(dead_code)]
 mod setup_blob;
 

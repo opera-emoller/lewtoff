@@ -12,6 +12,7 @@
 #![allow(unused_mut)]
 
 use crate::bitpack::BitWriter;
+use crate::debug_dump as dd;
 use crate::drft::{drft_forward_long, drft_forward_short};
 use crate::floor1::{floor1_encode, floor1_fit, Floor1State};
 use crate::mdct::{mdct_forward_long, mdct_forward_short};
@@ -77,6 +78,8 @@ pub(crate) fn mapping0_forward(
     };
     let n2 = n / 2;
     let channels = pcm_blocks.len();
+
+    let do_dump = !block_mode.is_long && dd::dump_enabled() && dd::try_claim_mapping0_dump();
 
     // Scale factor for dB computation (port of `scale = 4.f/n; scale_dB = todB(&scale) + .345`)
     let scale = 4.0f32 / n as f32;
@@ -155,6 +158,10 @@ pub(crate) fn mapping0_forward(
             let mut fft_buf = [0.0f32; SHORT_BLOCK];
             fft_buf.copy_from_slice(&pcm_blocks[i]);
             drft_forward_short(&mut fft_buf);
+            if do_dump && i == 0 {
+                std::fs::create_dir_all("/tmp/lewtoff-debug").ok();
+                dd::write_f32_bin("/tmp/lewtoff-debug/r_drft.bin", &fft_buf);
+            }
             let lam = scale_dB + to_db(fft_buf[0]) + 0.345_f32;
             logfft[i][0] = lam;
             local_ampmax[i] = lam;
@@ -167,6 +174,9 @@ pub(crate) fn mapping0_forward(
                     local_ampmax[i] = t;
                 }
                 j += 2;
+            }
+            if do_dump && i == 0 {
+                dd::write_f32_bin("/tmp/lewtoff-debug/r_logfft.bin", &logfft[i]);
             }
         }
         if local_ampmax[i] > 0.0 {
@@ -263,7 +273,15 @@ pub(crate) fn mapping0_forward(
                 i, n, *ampmax, logmask[0], logmask[1], logmask[2], logmask[3], logmask[4]
             );
         }
+        if do_dump && i == 0 {
+            dd::write_f32_bin("/tmp/lewtoff-debug/r_mask.bin", &logmask);
+        }
         floor_posts[i] = floor1_fit(floor_state, &logmdct, &logmask);
+        if do_dump && i == 0 {
+            if let Some(ref posts) = floor_posts[i] {
+                dd::write_i32_bin("/tmp/lewtoff-debug/r_floor_posts.bin", posts);
+            }
+        }
         if std::env::var("LW_DEBUG_FLOOR").is_ok() {
             if let Some(ref posts) = floor_posts[i] {
                 eprintln!(
@@ -298,6 +316,7 @@ pub(crate) fn mapping0_forward(
     let mut iwork: Vec<Vec<i32>> = vec![vec![0i32; n2]; channels];
     let mut nonzero = vec![0i32; channels];
 
+    let bits_before_floor = if do_dump { opb.bit_len() } else { 0 };
     for i in 0..channels {
         let submap = mapping.chmuxlist[i];
         let floor_state_idx = mapping.floorsubmap[submap];
@@ -310,6 +329,13 @@ pub(crate) fn mapping0_forward(
             &mut iwork[i],
             books,
             n,
+        );
+    }
+    if do_dump {
+        let floor_bits = opb.bit_len() - bits_before_floor;
+        dd::write_txt(
+            "/tmp/lewtoff-debug/r_floor_bits.txt",
+            &format!("{}\n", floor_bits),
         );
     }
 

@@ -1,0 +1,12 @@
+[package]
+name = "debug-rust-dump"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "debug-rust-dump"
+path = "src/main.rs"
+
+[dependencies]
+lewtoff = { path = "../.." }

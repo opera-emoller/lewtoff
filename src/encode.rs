@@ -695,6 +695,17 @@ pub(crate) fn encode_with_serial_and_meta(
                 })
                 .collect();
 
+            if block_idx == 0
+                && crate::debug_dump::dump_enabled()
+                && crate::debug_dump::try_claim_first_short_block()
+            {
+                std::fs::create_dir_all("/tmp/lewtoff-debug").ok();
+                crate::debug_dump::write_f32_bin(
+                    "/tmp/lewtoff-debug/r_windowed.bin",
+                    &windowed_blocks[0],
+                );
+            }
+
             block_mode = BlockMode {
                 mode_number: short_mode_number,
                 modebits: setup.modebits,
