@@ -542,6 +542,12 @@ static int mapping0_forward(vorbis_block *vb){
       float aotuv[psy_look->n];
 #endif
 
+        if(dump_now && i==0 && !dump_done){
+          int _dn;
+          for(_dn=0;_dn<n/2;_dn++) g_noise[_dn]=noise[_dn];
+          for(_dn=0;_dn<n/2;_dn++) g_tone[_dn]=tone[_dn];
+        }
+
         _vp_offset_and_mix(psy_look,
                            noise,
                            tone,

@@ -248,6 +248,22 @@ pub(crate) fn mapping0_forward(
             let nvals: Vec<String> = noise_bufs[i].iter().map(|v| format!("{:.6}", v)).collect();
             eprintln!("LW_BLOCK0_NOISE: [{}]", nvals.join(","));
         }
+        if std::env::var("LEWTOFF_DEBUG_DUMP").is_ok() && i == 0 {
+            use std::sync::atomic::{AtomicBool, Ordering};
+            static FIRED: AtomicBool = AtomicBool::new(false);
+            if !FIRED.swap(true, Ordering::Relaxed) {
+                let mut nbytes = Vec::new();
+                for v in noise_bufs[i].iter() {
+                    nbytes.extend_from_slice(&v.to_le_bytes());
+                }
+                let _ = std::fs::write("/tmp/lewtoff-debug/r_noise.bin", &nbytes);
+                let mut tbytes = Vec::new();
+                for v in tone_bufs[i].iter() {
+                    tbytes.extend_from_slice(&v.to_le_bytes());
+                }
+                let _ = std::fs::write("/tmp/lewtoff-debug/r_tone.bin", &tbytes);
+            }
+        }
         // Offset + mix (offset_select=1 = nominal, not bitrate managed)
         vp_offset_and_mix(
             psy_look,

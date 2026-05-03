@@ -47,20 +47,20 @@ static STEREO_THRESHHOLDS_LIMITED: [f64; 9] = [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 4.5
 // during psy_init (setup), not in the per-frame hot path.
 // ---------------------------------------------------------------------------
 
-/// toBARK: Bark scale approximation (scales.h).
-/// Used only in _vp_psy_init (setup time, not per-frame).
+/// toBARK (scales.h). C does the math in f64, returns f32. Mirror exactly.
 fn to_bark(n: f32) -> f32 {
-    13.1_f32 * (0.00074_f32 * n).atan() + 2.24_f32 * (n * n * 1.85e-8_f32).atan() + 1e-4_f32 * n
+    let n = n as f64;
+    (13.1 * (0.00074 * n).atan() + 2.24 * (n * n * 1.85e-8).atan() + 1e-4 * n) as f32
 }
 
-/// toOC: frequency -> octave (scales.h).  log is fine at setup time.
+/// toOC (scales.h). C: log(n) * 1.442695f - 5.965784f, log() is f64, cast to f32.
 fn to_oc(n: f32) -> f32 {
-    n.ln() * 1.442695_f32 - 5.965784_f32
+    ((n as f64).ln() * 1.442695 - 5.965784) as f32
 }
 
-/// fromOC: octave -> frequency (scales.h).  exp is fine at setup time.
+/// fromOC (scales.h). C: exp((o + 5.965784) * 0.693147), exp() is f64, cast to f32.
 fn from_oc(o: f32) -> f32 {
-    ((o + 5.965784_f32) * 0.693147_f32).exp()
+    (((o as f64 + 5.965784) * 0.693147).exp()) as f32
 }
 
 /// rint: round to nearest integer (C standard).
@@ -305,9 +305,11 @@ fn setup_tone_curves(
     }
 
     for i in 0..P_BANDS {
-        let bin = (from_oc(i as f32 * 0.5) / bin_hz).floor() as i64;
-        let lo_curve_f = to_oc(bin as f32 * bin_hz + 1.0) * 2.0;
-        let hi_curve_f = to_oc((bin + 1) as f32 * bin_hz) * 2.0;
+        // C does these arg computations in f64 (literals are double), casts to
+        // float only at the fromOC()/toOC() call boundary. Mirror that.
+        let bin = (from_oc((i as f64 * 0.5) as f32) / bin_hz).floor() as i64;
+        let lo_curve_f = to_oc((bin as f64 * bin_hz as f64 + 1.0) as f32) * 2.0;
+        let hi_curve_f = to_oc(((bin + 1) as f64 * bin_hz as f64) as f32) * 2.0;
         let mut lo_curve = lo_curve_f.ceil() as i64;
         let mut hi_curve = hi_curve_f.floor() as i64;
         if lo_curve > i as i64 {
@@ -328,10 +330,11 @@ fn setup_tone_curves(
             for k in lo_curve..=hi_curve {
                 let mut l: usize = 0;
                 for j in 0..EHMER_MAX {
-                    let lo_bin =
-                        (from_oc(j as f32 * 0.125 + k as f32 * 0.5 - 2.0625) / bin_hz) as i64;
-                    let hi_bin =
-                        (from_oc(j as f32 * 0.125 + k as f32 * 0.5 - 1.9375) / bin_hz) as i64 + 1;
+                    let lo_bin = (from_oc((j as f64 * 0.125 + k as f64 * 0.5 - 2.0625) as f32)
+                        / bin_hz) as i64;
+                    let hi_bin = (from_oc((j as f64 * 0.125 + k as f64 * 0.5 - 1.9375) as f32)
+                        / bin_hz) as i64
+                        + 1;
                     let lo_bin = lo_bin.max(0).min(n as i64) as usize;
                     let hi_bin = hi_bin.max(0).min(n as i64) as usize;
                     if lo_bin < l {
@@ -357,10 +360,11 @@ fn setup_tone_curves(
                 let mut l: usize = 0;
                 let k = i + 1;
                 for j in 0..EHMER_MAX {
-                    let lo_bin =
-                        (from_oc(j as f32 * 0.125 + i as f32 * 0.5 - 2.0625) / bin_hz) as i64;
-                    let hi_bin =
-                        (from_oc(j as f32 * 0.125 + i as f32 * 0.5 - 1.9375) / bin_hz) as i64 + 1;
+                    let lo_bin = (from_oc((j as f64 * 0.125 + i as f64 * 0.5 - 2.0625) as f32)
+                        / bin_hz) as i64;
+                    let hi_bin = (from_oc((j as f64 * 0.125 + i as f64 * 0.5 - 1.9375) as f32)
+                        / bin_hz) as i64
+                        + 1;
                     let lo_bin = lo_bin.max(0).min(n as i64) as usize;
                     let hi_bin = hi_bin.max(0).min(n as i64) as usize;
                     if lo_bin < l {
@@ -383,7 +387,8 @@ fn setup_tone_curves(
 
             // pull values back into curve
             for j in 0..EHMER_MAX {
-                let bin = (from_oc(j as f32 * 0.125 + i as f32 * 0.5 - 2.0) / bin_hz) as i64;
+                let bin =
+                    (from_oc((j as f64 * 0.125 + i as f64 * 0.5 - 2.0) as f32) / bin_hz) as i64;
                 if bin < 0 || bin >= n as i64 {
                     ret[i][m][j + 2] = -999.0;
                 } else {
@@ -525,6 +530,13 @@ pub fn vp_psy_init(
     }
 
     // tone curves
+    if std::env::var("LEWTOFF_DEBUG_DUMP").is_ok() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        static FIRED: AtomicBool = AtomicBool::new(false);
+        if !FIRED.swap(true, Ordering::Relaxed) {
+            // We dump after setup_tone_curves. Mark for later.
+        }
+    }
     p.tonecurves = setup_tone_curves(
         &vi.toneatt,
         rate as f32 * 0.5 / n as f32,
@@ -532,6 +544,21 @@ pub fn vp_psy_init(
         vi.tone_centerboost,
         vi.tone_decay,
     );
+    if std::env::var("LEWTOFF_DEBUG_DUMP").is_ok() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        static FIRED: AtomicBool = AtomicBool::new(false);
+        if !FIRED.swap(true, Ordering::Relaxed) {
+            let mut bytes = Vec::new();
+            for b in 0..P_BANDS {
+                for lv in 0..P_LEVELS {
+                    for v in p.tonecurves[b][lv].iter() {
+                        bytes.extend_from_slice(&v.to_le_bytes());
+                    }
+                }
+            }
+            let _ = std::fs::write("/tmp/lewtoff-debug/r_tonecurves.bin", &bytes);
+        }
+    }
 
     // noise offsets
     for i in 0..n {
@@ -1024,6 +1051,17 @@ pub fn vp_tonemask(
     }
 
     seed_loop(p, &p.tonecurves, logfft, logmask, &mut seed, global_specmax);
+    if std::env::var("LEWTOFF_DEBUG_DUMP").is_ok() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        static FIRED: AtomicBool = AtomicBool::new(false);
+        if !FIRED.swap(true, Ordering::Relaxed) {
+            let mut bytes = Vec::new();
+            for v in seed.iter() {
+                bytes.extend_from_slice(&v.to_le_bytes());
+            }
+            let _ = std::fs::write("/tmp/lewtoff-debug/r_tone_seed.bin", &bytes);
+        }
+    }
     max_seeds(p, &mut seed, logmask);
 }
 

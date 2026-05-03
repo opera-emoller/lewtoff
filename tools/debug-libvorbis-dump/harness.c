@@ -118,6 +118,8 @@ int main(void) {
                 write_f32("c_logfft.bin",   g_logfft,  half);
                 write_f32("c_logmdct.bin",  g_logmdct, half);
                 write_f32("c_mask.bin",     g_logmask, half);
+                write_f32("c_noise.bin",    g_noise,   half);
+                write_f32("c_tone.bin",     g_tone,    half);
 
                 write_i32("c_floor_posts.bin", g_floor_posts, g_floor_post_count);
 

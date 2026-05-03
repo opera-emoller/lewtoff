@@ -330,6 +330,21 @@ void _vp_psy_init(vorbis_look_psy *p,vorbis_info_psy *vi,
   p->tonecurves=setup_tone_curves(vi->toneatt,rate*.5/n,n,
                                   vi->tone_centerboost,vi->tone_decay);
 
+  /* dump tonecurves */
+  {
+    static int fired=0;
+    if(!fired){
+      fired=1;
+      FILE *fff=fopen("/tmp/lewtoff-debug/c_tonecurves.bin","wb");
+      if(fff){
+        for(int b=0;b<P_BANDS;b++)
+          for(int lv=0;lv<P_LEVELS;lv++)
+            fwrite(p->tonecurves[b][lv], sizeof(float), EHMER_MAX+2, fff);
+        fclose(fff);
+      }
+    }
+  }
+
   /* set up rolling noise median */
   p->noiseoffset=_ogg_malloc(P_NOISECURVES*sizeof(*p->noiseoffset));
   for(i=0;i<P_NOISECURVES;i++)
@@ -796,6 +811,14 @@ void _vp_tonemask(vorbis_look_psy *p,
 
   /* tone masking */
   seed_loop(p,(const float ***)p->tonecurves,logfft,logmask,seed,global_specmax);
+  {
+    static int fired = 0;
+    if (!fired) {
+      fired = 1;
+      FILE *fff = fopen("/tmp/lewtoff-debug/c_tone_seed.bin", "wb");
+      if (fff) { fwrite(seed, sizeof(float), p->total_octave_lines, fff); fclose(fff); }
+    }
+  }
   max_seeds(p,seed,logmask);
 
 }
