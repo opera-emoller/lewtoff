@@ -17,13 +17,15 @@ pub fn lpc_from_data(data: &[f32], lpci: &mut [f32], n: usize, m: usize) -> f32 
     let mut lpc = vec![0.0f64; m];
 
     // Autocorrelation, m+1 lag coefficients.
-    // Use mul_add to match the FMA (fused multiply-add) behavior of clang -O2 on arm64,
-    // which is used by ffmpeg/libvorbis. Without FMA, the accumulated sums differ by
-    // ~1e-7 leading to slightly different LPC coefficients and predicted samples.
+    // libvorbis lib/lpc.c::vorbis_lpc_from_data writes:
+    //   double d = 0; for(i=j;i<n;i++) d += (double)data[i]*data[i-j];
+    // The cast to (double) on the LEFT operand promotes; the right operand
+    // (also float) gets promoted by the multiplication; product is in
+    // double precision. We mirror that exactly — separate mul + add, no FMA.
     for j in 0..=m {
         let mut d = 0.0f64;
         for i in j..n {
-            d = (data[i] as f64).mul_add(data[i - j] as f64, d);
+            d += (data[i] as f64) * (data[i - j] as f64);
         }
         aut[j] = d;
     }
@@ -59,6 +61,8 @@ pub fn lpc_from_data(data: &[f32], lpci: &mut [f32], n: usize, m: usize) -> f32 
             lpc[j] += r * lpc[i - 1 - j];
             lpc[i - 1 - j] += r * tmp;
         }
+        // libvorbis: after `for(j=0;j<i/2;j++)` exits with j=i/2,
+        //   if(i&1) lpc[j] += lpc[j]*r;  (i.e. lpc[i/2])
         if i & 1 != 0 {
             lpc[i / 2] += lpc[i / 2] * r;
         }
@@ -98,6 +102,10 @@ pub fn lpc_predict(coeff: &[f32], prime: &[f32], m: usize, data: &mut [f32], n: 
         work[..m].copy_from_slice(&prime[..m]);
     }
 
+    // Port of libvorbis lib/lpc.c::vorbis_lpc_predict:
+    //   o=i; p=m;
+    //   for(j=0;j<m;j++) y-=work[o++]*coeff[--p];
+    // coeff is read REVERSED while work is read FORWARD. Mirror that.
     for i in 0..n {
         let mut y = 0.0f32;
         for (o, p) in (i..i + m).zip((0..m).rev()) {

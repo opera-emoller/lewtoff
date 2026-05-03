@@ -224,7 +224,10 @@ fn drfti1(n: usize, wa: &mut Vec<f32>, ifac: &mut Vec<i32>) {
 
     ifac[0] = n as i32;
     ifac[1] = nf;
-    let argh = TPI / n as f64;
+    // libvorbis smallft.c does this math in float (f32). We mirror that exactly
+    // so the precomputed trigcache is byte-identical to what drft_init produces
+    // at runtime in libvorbis. f64-then-cast diverges by ULPs.
+    let argh: f32 = (TPI / n as f64) as f32;
     let mut is: usize = 0;
     let nfm1 = nf - 1;
     let mut l1: i32 = 1;
@@ -243,14 +246,14 @@ fn drfti1(n: usize, wa: &mut Vec<f32>, ifac: &mut Vec<i32>) {
         for _j in 0..ipm {
             ld += l1;
             let mut i = is;
-            let argld = ld as f64 * argh;
-            let mut fi = 0.0f64;
+            let argld: f32 = (ld as f32) * argh;
+            let mut fi: f32 = 0.0;
             let mut ii = 2;
             while ii < ido {
                 fi += 1.0;
-                let arg = fi * argld;
-                wa[i] = arg.cos() as f32;
-                wa[i + 1] = arg.sin() as f32;
+                let arg: f32 = fi * argld;
+                wa[i] = arg.cos();
+                wa[i + 1] = arg.sin();
                 i += 2;
                 ii += 2;
             }

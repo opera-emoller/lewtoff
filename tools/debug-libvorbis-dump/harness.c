@@ -65,7 +65,7 @@ int main(void) {
 
     const int RATE = 44100;
     const int FRAMES = RATE;
-    const int CHUNK = 1024;
+    const int CHUNK = 64;
 
     int fed = 0;
     int packet_count = 0;
@@ -79,7 +79,8 @@ int main(void) {
             float **pcm = vorbis_analysis_buffer(&vd, this_chunk);
             for (int i = 0; i < this_chunk; i++) {
                 double v = sin(2.0 * M_PI * 440.0 * (fed + i) / (double)RATE);
-                pcm[0][i] = (float)(v * (32767.0 / 32768.0));
+                int16_t s = (int16_t)(v * 16384.0);  /* truncate like Rust 'as i16' */
+                pcm[0][i] = s / 32768.0f;
             }
             vorbis_analysis_wrote(&vd, this_chunk);
             fed += this_chunk;
@@ -108,6 +109,7 @@ int main(void) {
 
                 int half = g_windowed_n / 2 + 1;
                 write_f32("c_logfft.bin",   g_logfft,  half);
+                write_f32("c_logmdct.bin",  g_logmdct, half);
                 write_f32("c_mask.bin",     g_logmask, half);
 
                 write_i32("c_floor_posts.bin", g_floor_posts, g_floor_post_count);

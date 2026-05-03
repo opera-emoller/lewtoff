@@ -351,9 +351,13 @@ void _vp_psy_init(vorbis_look_psy *p,vorbis_info_psy *vi,
 
     /* DEBUG: print first few bins of noiseoffset */
     if(i==0){
+      int _dbgi;
       fprintf(stderr,"PSY_INIT_DEBUG: n=%d rate=%ld blockflag=%d bin0: halfoc=%.6f inthalfoc=%d del=%.6f noiseoff[1][0]=%.6f noiseoff[1][1]=%.6f\n",
         n, (long)rate, p->vi->blockflag, halfoc, inthalfoc, del,
         p->vi->noiseoff[1][0], p->vi->noiseoff[1][1]);
+      fprintf(stderr,"PSY_INIT_DEBUG_NOISEOFF1: n=%d [",n);
+      for(_dbgi=0;_dbgi<18;_dbgi++) fprintf(stderr,"%.4f%s",p->vi->noiseoff[1][_dbgi],_dbgi<17?",":"");
+      fprintf(stderr,"]\n");
     }
 
     for(j=0;j<P_NOISECURVES;j++)

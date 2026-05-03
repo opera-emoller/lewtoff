@@ -301,7 +301,7 @@ static int mapping0_forward(vorbis_block *vb){
     }
 
     /* DEBUG: print windowed PCM for first block */
-    if(vb->sequence<=5 && i==0){
+    if(vb->sequence<=7 && i==0){
       int dbgj;
       fprintf(stderr,"LV_WINDOWED_PCM_seq%lld: [",(long long)vb->sequence);
       for(dbgj=0;dbgj<n;dbgj++) fprintf(stderr,"%.8f%s",pcm[dbgj],dbgj<n-1?",":"");
@@ -324,14 +324,15 @@ static int mapping0_forward(vorbis_block *vb){
     mdct_forward(b->transform[vb->W][0],pcm,gmdct[i]);
 
     /* DEBUG: print raw MDCT output at specific bins */
-    if(vb->sequence<=5 && i==0){
-      int dbg_bins[]={14,224,265,269,273,347,490};
+    if(vb->sequence<=8 && i==0){
+      int dbg_bins[]={14,186,220,260,312,372,490};
       int nb=7,dbgj;
       for(dbgj=0;dbgj<nb;dbgj++){
         int b=dbg_bins[dbgj];
         if(b<n/2)
-          fprintf(stderr,"LV_MDCT_RAW seq=%lld ch=0 n=%ld bin=%d: gmdct=%.10e\n",
-            (long long)vb->sequence,vb->pcmend,b,gmdct[i][b]);
+          fprintf(stderr,"LV_MDCT_RAW seq=%lld ch=0 n=%ld bin=%d: gmdct=%.10e logmdct=%.4f\n",
+            (long long)vb->sequence,vb->pcmend,b,gmdct[i][b],
+            todB(&gmdct[i][b])+0.345f);
       }
     }
 
@@ -441,6 +442,11 @@ static int mapping0_forward(vorbis_block *vb){
                                      things back up here, and
                                      recalibrate the tunings in the
                                      next major model upgrade. */
+
+      if(dump_now && i==0 && !dump_done){
+        int _dn;
+        for(_dn=0;_dn<n/2;_dn++) g_logmdct[_dn]=logmdct[_dn];
+      }
 
 #if 0
       if(vi->channels==2){
@@ -615,6 +621,12 @@ static int mapping0_forward(vorbis_block *vb){
         fprintf(stderr,"LV_LOGMASK seq=%lld n=%d [0..5]: %.2f %.2f %.2f %.2f %.2f\n",
           (long long)vb->sequence, (int)vb->pcmend,
           logmask[0], logmask[1], logmask[2], logmask[3], logmask[4]);
+        if((int)vb->pcmend==2048){
+          fprintf(stderr,"LV_LOGMASK_BINS seq=%lld: bin186=%.6f bin220=%.6f bin260=%.6f bin312=%.6f bin372=%.6f\n",
+            (long long)vb->sequence, logmask[186], logmask[220], logmask[260], logmask[312], logmask[372]);
+          fprintf(stderr,"LV_LOGMDCT_BINS seq=%lld: bin186=%.6f bin220=%.6f bin260=%.6f bin312=%.6f bin372=%.6f\n",
+            (long long)vb->sequence, logmdct[186], logmdct[220], logmdct[260], logmdct[312], logmdct[372]);
+        }
       }
 
       /* are we managing bitrate?  If so, perform two more fits for

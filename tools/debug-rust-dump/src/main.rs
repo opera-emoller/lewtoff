@@ -10,14 +10,14 @@ fn main() {
     let rate_hz = 44100usize;
     let duration_secs = 1usize;
     let n_samples = rate_hz * duration_secs;
-    let freq = 440.0f64;
-    let amplitude = 32767.0f64;
+    let freq = 440.0f32;
+    let amplitude = 16384.0f32;
 
     let samples: Vec<i16> = (0..n_samples)
         .map(|i| {
-            let t = i as f64 / rate_hz as f64;
-            let v = amplitude * (2.0 * std::f64::consts::PI * freq * t).sin();
-            v.round() as i16
+            let t = i as f32 / rate_hz as f32;
+            let v = amplitude * (2.0 * std::f32::consts::PI * freq * t).sin();
+            v as i16
         })
         .collect();
 

@@ -214,7 +214,7 @@ pub(crate) fn mapping0_forward(
             .map(|&v| to_db(v.abs()) + 0.345_f32)
             .collect();
         if std::env::var("LW_DEBUG_MDCT_RAW").is_ok() {
-            for &b in &[14usize, 224, 265, 269, 273, 347, 490] {
+            for &b in &[14usize, 186, 220, 260, 312, 372, 490] {
                 if b < n2 {
                     eprintln!(
                         "LW_MDCT_RAW ch={} n={} bin={}: gmdct={:.10e} logmdct={:.4}",
@@ -272,6 +272,16 @@ pub(crate) fn mapping0_forward(
                 "LW_LOGMASK ch={} n={} ampmax={:.2} [0..5]: {:.2} {:.2} {:.2} {:.2} {:.2}",
                 i, n, *ampmax, logmask[0], logmask[1], logmask[2], logmask[3], logmask[4]
             );
+            if n == LONG_BLOCK {
+                eprintln!(
+                    "LW_LOGMASK_BINS n={}: bin186={:.6} bin220={:.6} bin260={:.6} bin312={:.6} bin372={:.6}",
+                    n, logmask[186], logmask[220], logmask[260], logmask[312], logmask[372]
+                );
+                eprintln!(
+                    "LW_LOGMDCT_BINS n={}: bin186={:.6} bin220={:.6} bin260={:.6} bin312={:.6} bin372={:.6}",
+                    n, logmdct[186], logmdct[220], logmdct[260], logmdct[312], logmdct[372]
+                );
+            }
         }
         if do_dump && i == 0 {
             dd::write_f32_bin("/tmp/lewtoff-debug/r_mask.bin", &logmask);

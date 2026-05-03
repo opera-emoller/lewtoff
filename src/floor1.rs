@@ -1550,17 +1550,37 @@ mod tests {
             let state = floor1_look(setup.clone());
             let postlist: Vec<i32> = (0..total_posts).map(|i| state.vi.postlist[i]).collect();
             eprintln!(
-                "floor {fi}: posts={total_posts} mult={} n={}",
-                setup.mult, setup.postlist[1]
+                "floor {fi}: posts={total_posts} mult={} n={} quant_q={}",
+                setup.mult, setup.postlist[1], state.quant_q
             );
             eprintln!("  postlist={:?}", postlist);
-            eprintln!("  sorted_index={:?}", &state.sorted_index[..total_posts]);
             eprintln!(
-                "  sorted_postlist={:?}",
-                (0..total_posts)
-                    .map(|i| state.sorted_index[i])
-                    .collect::<Vec<_>>()
+                "  partitions={} partitionclass={:?}",
+                setup.partitions,
+                &setup.partitionclass[..setup.partitions as usize]
             );
+            eprintln!(
+                "  class_dim={:?}",
+                &setup.class_dim[..(setup.partitions as usize).min(16)]
+            );
+            eprintln!(
+                "  class_subs={:?}",
+                &setup.class_subs[..(setup.partitions as usize).min(16)]
+            );
+            eprintln!(
+                "  class_book={:?}",
+                &setup.class_book[..(setup.partitions as usize).min(16)]
+            );
+            for k in 0..(setup.partitions as usize).min(16) {
+                let cls = setup.partitionclass[k] as usize;
+                let cdim = setup.class_dim[cls] as usize;
+                let csubs = setup.class_subs[cls];
+                eprintln!(
+                    "  partition[{k}]: class={cls} cdim={cdim} csubs={csubs} subbooks={:?}",
+                    &setup.class_subbook[cls][..1 << csubs]
+                );
+            }
+            eprintln!("  sorted_index={:?}", &state.sorted_index[..total_posts]);
         }
     }
 
