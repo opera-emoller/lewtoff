@@ -1103,9 +1103,31 @@ pub(crate) fn encode_with_serial_and_meta(
             decoded_samples = LONG_HALF as u64;
         }
 
-        // Update granule position
-        cumulative_granule += decoded_samples;
+        // libvorbis sets vb->granulepos = v->granulepos at packet emit time,
+        // BEFORE adding this block's movementW (= bs[W]/4 + bs[nW]/4). So the
+        // first packet has granulepos = 0, and each subsequent packet's
+        // granulepos accumulates movementW from PRIOR blocks. At EOS, libvorbis
+        // caps granulepos so final = total_samples (subtracting the centerW
+        // over-shoot beyond eofflag).
+        let _ = decoded_samples;
         let granule_pos = cumulative_granule.min(total_samples as u64);
+        let movement_w: u64 = (if cur_w == 1 {
+            LONG_BLOCK as u64
+        } else {
+            SHORT_BLOCK as u64
+        }) / 4
+            + (if next_w == 1 {
+                LONG_BLOCK as u64
+            } else {
+                SHORT_BLOCK as u64
+            }) / 4;
+        if is_last {
+            // Cap at total_samples on the final block (mirroring libvorbis's
+            // movementW - (centerW - eofflag) clamp).
+            cumulative_granule = (cumulative_granule + movement_w).min(total_samples as u64);
+        } else {
+            cumulative_granule += movement_w;
+        }
 
         let mapping = if is_short {
             short_mapping
