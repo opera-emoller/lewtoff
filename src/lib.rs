@@ -36,7 +36,8 @@ pub mod mdct;
 #[doc(hidden)]
 pub mod ogg_pages;
 
-mod encode;
+#[doc(hidden)]
+pub mod encode;
 mod mapping0;
 mod setup;
 mod window;
@@ -59,4 +60,16 @@ pub enum Channels {
 /// supported input space (see crate docs / `README.md`).
 pub fn encode(samples: &[i16], rate: SampleRate, channels: Channels) -> Vec<u8> {
     crate::encode::encode_impl(samples, rate, channels)
+}
+
+/// Like [`encode`] but uses the given stream serial number.
+/// Exposed for parity tests so the test can match the serial that ffmpeg chose.
+#[doc(hidden)]
+pub fn encode_with_serial(
+    samples: &[i16],
+    rate: SampleRate,
+    channels: Channels,
+    serial: u32,
+) -> Vec<u8> {
+    crate::encode::encode_with_serial(samples, rate, channels, serial)
 }

@@ -1,0 +1,12 @@
+[package]
+name = "parity-diff"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "parity-diff"
+path = "src/main.rs"
+
+[dependencies]
+ogg = "0.9"

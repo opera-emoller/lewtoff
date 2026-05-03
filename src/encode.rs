@@ -179,10 +179,28 @@ fn make_q5_psy(rate: i64) -> VorbisInfoPsy {
 }
 
 // ---------------------------------------------------------------------------
-// encode_impl: main encode entry point
+// encode_impl / encode_with_serial: main encode entry point
 // ---------------------------------------------------------------------------
 
+fn random_serial() -> u32 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let t = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.subsec_nanos())
+        .unwrap_or(0x1234_5678);
+    t ^ 0xDEAD_BEEF
+}
+
 pub(crate) fn encode_impl(samples: &[i16], rate: SampleRate, channels: Channels) -> Vec<u8> {
+    encode_with_serial(samples, rate, channels, random_serial())
+}
+
+pub(crate) fn encode_with_serial(
+    samples: &[i16],
+    rate: SampleRate,
+    channels: Channels,
+    serial: u32,
+) -> Vec<u8> {
     let ch = match channels {
         Channels::Mono => 1usize,
         Channels::Stereo => 2usize,
@@ -237,7 +255,6 @@ pub(crate) fn encode_impl(samples: &[i16], rate: SampleRate, channels: Channels)
     // In Vorbis, granule position is the number of samples decoded so far.
 
     // OGG writer
-    let serial = 0xDEAD_BEEF_u32;
     let mut ogg = OggStreamWriter::new(serial);
 
     // Write the three header packets (force page flushes per Vorbis spec)

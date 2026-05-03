@@ -1,0 +1,169 @@
+//! Byte-parity tests: lewtoff vs ffmpeg -c:a libvorbis -q:a 5.
+//!
+//! Gated behind the `oracle` feature so contributors without ffmpeg can still
+//! run the rest of the suite. Run with:
+//!   cargo nextest run --features oracle parity_
+//!
+//! All tests are marked `#[ignore]` because parity is not yet achieved —
+//! remove `#[ignore]` once the divergences are fixed.
+
+#![cfg(feature = "oracle")]
+
+use lewtoff::{Channels, SampleRate};
+use std::io::Write;
+use std::process::{Command, Stdio};
+
+fn ffmpeg_encode_q5(samples: &[i16], rate: u32, channels: u16) -> Vec<u8> {
+    let raw: Vec<u8> = samples.iter().flat_map(|&s| s.to_le_bytes()).collect();
+
+    let mut child = Command::new("ffmpeg")
+        .args([
+            "-y",
+            "-f",
+            "s16le",
+            "-ar",
+            &rate.to_string(),
+            "-ac",
+            &channels.to_string(),
+            "-i",
+            "pipe:0",
+            "-c:a",
+            "libvorbis",
+            "-q:a",
+            "5",
+            "-f",
+            "ogg",
+            "pipe:1",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("failed to spawn ffmpeg — is it on PATH with libvorbis?");
+
+    child.stdin.take().unwrap().write_all(&raw).unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "ffmpeg exited with non-zero status"
+    );
+    output.stdout
+}
+
+fn extract_serial(ogg_bytes: &[u8]) -> u32 {
+    assert!(
+        ogg_bytes.len() >= 18,
+        "ogg output too short to contain serial"
+    );
+    u32::from_le_bytes(ogg_bytes[14..18].try_into().unwrap())
+}
+
+fn first_diff(a: &[u8], b: &[u8]) -> usize {
+    let common = a.len().min(b.len());
+    for i in 0..common {
+        if a[i] != b[i] {
+            return i;
+        }
+    }
+    common
+}
+
+fn assert_parity(samples: &[i16], rate: SampleRate, channels: Channels) {
+    let rate_hz: u32 = match rate {
+        SampleRate::Hz44100 => 44100,
+        SampleRate::Hz48000 => 48000,
+    };
+    let ch: u16 = match channels {
+        Channels::Mono => 1,
+        Channels::Stereo => 2,
+    };
+
+    let ffmpeg_bytes = ffmpeg_encode_q5(samples, rate_hz, ch);
+    let serial = extract_serial(&ffmpeg_bytes);
+    let lewtoff_bytes = lewtoff::encode_with_serial(samples, rate, channels, serial);
+
+    if lewtoff_bytes != ffmpeg_bytes {
+        let div = first_diff(&lewtoff_bytes, &ffmpeg_bytes);
+        let lw_start = div.saturating_sub(8);
+        let lw_end = (div + 16).min(lewtoff_bytes.len());
+        let ff_end = (div + 16).min(ffmpeg_bytes.len());
+        let ff_start = div.saturating_sub(8).min(ffmpeg_bytes.len());
+        panic!(
+            "parity diverged at byte {div}\n  lewtoff len: {}\n  ffmpeg  len: {}\n  lewtoff ctx: {:02x?}\n  ffmpeg  ctx: {:02x?}",
+            lewtoff_bytes.len(),
+            ffmpeg_bytes.len(),
+            &lewtoff_bytes[lw_start..lw_end],
+            &ffmpeg_bytes[ff_start..ff_end],
+        );
+    }
+}
+
+fn make_sine_mono(rate: u32, freq: f32, duration_secs: f32) -> Vec<i16> {
+    let n = (rate as f32 * duration_secs) as usize;
+    (0..n)
+        .map(|i| {
+            let t = i as f32 / rate as f32;
+            (f32::sin(2.0 * std::f32::consts::PI * freq * t) * 16384.0) as i16
+        })
+        .collect()
+}
+
+#[test]
+#[ignore = "parity not yet achieved — Task 9b.2 will fix divergences"]
+fn parity_silence_mono44() {
+    assert_parity(&vec![0i16; 44100], SampleRate::Hz44100, Channels::Mono);
+}
+
+#[test]
+#[ignore = "parity not yet achieved — Task 9b.2 will fix divergences"]
+fn parity_silence_stereo44() {
+    let stereo: Vec<i16> = vec![0i16; 44100 * 2];
+    assert_parity(&stereo, SampleRate::Hz44100, Channels::Stereo);
+}
+
+#[test]
+#[ignore = "parity not yet achieved — Task 9b.2 will fix divergences"]
+fn parity_silence_mono48() {
+    assert_parity(&vec![0i16; 48000], SampleRate::Hz48000, Channels::Mono);
+}
+
+#[test]
+#[ignore = "parity not yet achieved — Task 9b.2 will fix divergences"]
+fn parity_silence_stereo48() {
+    let stereo: Vec<i16> = vec![0i16; 48000 * 2];
+    assert_parity(&stereo, SampleRate::Hz48000, Channels::Stereo);
+}
+
+#[test]
+#[ignore = "parity not yet achieved — Task 9b.2 will fix divergences"]
+fn parity_sine_440_mono44() {
+    let samples = make_sine_mono(44100, 440.0, 1.0);
+    assert_parity(&samples, SampleRate::Hz44100, Channels::Mono);
+}
+
+#[test]
+#[ignore = "parity not yet achieved — Task 9b.2 will fix divergences"]
+fn parity_ramp_stereo44() {
+    let n = 44100usize;
+    let samples: Vec<i16> = (0..n * 2)
+        .map(|i| ((i % 65536) as i32 - 32768) as i16)
+        .collect();
+    assert_parity(&samples, SampleRate::Hz44100, Channels::Stereo);
+}
+
+#[test]
+#[ignore = "manual dump for parity-diff analysis"]
+fn parity_dump_files() {
+    let samples = vec![0i16; 44100];
+    let ffmpeg_bytes = ffmpeg_encode_q5(&samples, 44100, 1);
+    let serial = extract_serial(&ffmpeg_bytes);
+    let lewtoff_bytes =
+        lewtoff::encode_with_serial(&samples, SampleRate::Hz44100, Channels::Mono, serial);
+    std::fs::write("/tmp/ff_parity.ogg", &ffmpeg_bytes).unwrap();
+    std::fs::write("/tmp/lw_parity.ogg", &lewtoff_bytes).unwrap();
+    eprintln!(
+        "Wrote ff_parity.ogg ({} bytes) and lw_parity.ogg ({} bytes)",
+        ffmpeg_bytes.len(),
+        lewtoff_bytes.len()
+    );
+}
