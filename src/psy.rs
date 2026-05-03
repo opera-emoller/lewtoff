@@ -47,20 +47,32 @@ static STEREO_THRESHHOLDS_LIMITED: [f64; 9] = [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 4.5
 // during psy_init (setup), not in the per-frame hot path.
 // ---------------------------------------------------------------------------
 
-/// toBARK (scales.h). C does the math in f64, returns f32. Mirror exactly.
+/// toBARK (scales.h): `13.1f*atan(.00074f*n)+2.24f*atan(n*n*1.85e-8f)+1e-4f*n`.
+/// All constants are f32 in C and get promoted to f64 in math (atan is f64).
+/// Match exactly by promoting f32 constants to f64 before the arithmetic.
 fn to_bark(n: f32) -> f32 {
     let n = n as f64;
-    (13.1 * (0.00074 * n).atan() + 2.24 * (n * n * 1.85e-8).atan() + 1e-4 * n) as f32
+    let c0 = 13.1_f32 as f64;
+    let c1 = 0.00074_f32 as f64;
+    let c2 = 2.24_f32 as f64;
+    let c3 = 1.85e-8_f32 as f64;
+    let c4 = 1e-4_f32 as f64;
+    (c0 * (c1 * n).atan() + c2 * (n * n * c3).atan() + c4 * n) as f32
 }
 
-/// toOC (scales.h). C: log(n) * 1.442695f - 5.965784f, log() is f64, cast to f32.
+/// toOC (scales.h): `log(n)*1.442695f-5.965784f`. C constants are f32, promoted
+/// to f64 in the math.
 fn to_oc(n: f32) -> f32 {
-    ((n as f64).ln() * 1.442695 - 5.965784) as f32
+    let c1 = 1.442695_f32 as f64;
+    let c2 = 5.965784_f32 as f64;
+    ((n as f64).ln() * c1 - c2) as f32
 }
 
-/// fromOC (scales.h). C: exp((o + 5.965784) * 0.693147), exp() is f64, cast to f32.
+/// fromOC (scales.h): `exp((o+5.965784f)*.693147f)`. f32 constants promoted to f64.
 fn from_oc(o: f32) -> f32 {
-    (((o as f64 + 5.965784) * 0.693147).exp()) as f32
+    let c1 = 5.965784_f32 as f64;
+    let c2 = 0.693147_f32 as f64;
+    (((o as f64 + c1) * c2).exp()) as f32
 }
 
 /// rint: round to nearest integer (C standard).
