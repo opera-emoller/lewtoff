@@ -70,6 +70,40 @@ fn assert_parity_oracle(samples: &[i16], rate: SampleRate, channels: Channels) {
     }
 }
 
+/// Decode an audio file (any format ffmpeg understands) to interleaved
+/// `i16` PCM at the given `rate` and `channels`, using ffmpeg's `aresample`
+/// filter for sample-rate / channel-count conversion. Returns the samples
+/// the encoder will see.
+fn ffmpeg_decode_to_pcm(path: &std::path::Path, rate: u32, channels: u16) -> Vec<i16> {
+    let out = Command::new("ffmpeg")
+        .args(["-hide_banner", "-loglevel", "error", "-i"])
+        .arg(path)
+        .args([
+            "-f",
+            "s16le",
+            "-ac",
+            &channels.to_string(),
+            "-ar",
+            &rate.to_string(),
+            "-",
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .expect("ffmpeg decode failed to spawn");
+    assert!(
+        out.status.success(),
+        "ffmpeg decode of {} failed: {}",
+        path.display(),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let bytes = out.stdout;
+    bytes
+        .chunks_exact(2)
+        .map(|c| i16::from_le_bytes([c[0], c[1]]))
+        .collect()
+}
+
 fn ffmpeg_encode_q5(samples: &[i16], rate: u32, channels: u16) -> Vec<u8> {
     let raw: Vec<u8> = samples.iter().flat_map(|&s| s.to_le_bytes()).collect();
 
@@ -342,4 +376,88 @@ fn parity_dump_sine_files() {
         ffmpeg_bytes.len(),
         lewtoff_bytes.len()
     );
+}
+
+// --- Corpus parity (Phase 10) -----------------------------------------------
+//
+// Decode each file in sounds/ via ffmpeg to i16 PCM at the chosen rate and
+// channel count, then assert byte-identical parity against the oracle. Files
+// listed below are pre-converted to one of the four supported (rate, channels)
+// combinations; any divergence panics with the file name and per-file
+// divergence offset so the failure is easy to localize.
+
+const CORPUS_44_STEREO: &[&str] = &[
+    "snd_broken_loop.mp3",
+    "snd_neon_nights.mp3",
+    "snd_ready_set_apply.mp3",
+    "snd_ready_set_squirt.mp3",
+    "snd_result_xoxo_victory_1.wav",
+    "snd_result_xoxo_victory_2.wav",
+    "snd_result_xoxo_victory_3.wav",
+    "snd_smudge.wav",
+    "snd_text_transition_swoosh_long.wav",
+    "snd_time_countdown.wav",
+    "snd_time_countdown_clock.wav",
+    "snd_tube_splash_1.wav",
+    "snd_ui_input_confirm.wav",
+    "snd_ui_result_screen.wav",
+];
+
+fn corpus_path(name: &str) -> std::path::PathBuf {
+    std::env::current_dir().unwrap().join("sounds").join(name)
+}
+
+fn run_corpus_parity(name: &str, rate: SampleRate, channels: Channels) {
+    let rate_hz: u32 = match rate {
+        SampleRate::Hz44100 => 44100,
+        SampleRate::Hz48000 => 48000,
+    };
+    let ch: u16 = match channels {
+        Channels::Mono => 1,
+        Channels::Stereo => 2,
+    };
+    let path = corpus_path(name);
+    if !path.exists() {
+        panic!("missing corpus file: {}", path.display());
+    }
+    let samples = ffmpeg_decode_to_pcm(&path, rate_hz, ch);
+    eprintln!(
+        "corpus {name}: {} samples ({:.2}s @ {rate_hz}Hz × {ch}ch)",
+        samples.len(),
+        samples.len() as f32 / (rate_hz as f32 * ch as f32)
+    );
+    assert_parity_oracle(&samples, rate, channels);
+}
+
+#[test]
+fn corpus_parity_44_stereo() {
+    let mut failures = Vec::new();
+    for &name in CORPUS_44_STEREO {
+        let result = std::panic::catch_unwind(|| {
+            run_corpus_parity(name, SampleRate::Hz44100, Channels::Stereo);
+        });
+        if let Err(e) = result {
+            let msg = e
+                .downcast_ref::<String>()
+                .cloned()
+                .or_else(|| e.downcast_ref::<&str>().map(|s| s.to_string()))
+                .unwrap_or_else(|| "unknown panic".to_string());
+            eprintln!("FAIL  {name}: {}", msg.lines().next().unwrap_or(""));
+            failures.push((name, msg));
+        } else {
+            eprintln!("PASS  {name}");
+        }
+    }
+    if !failures.is_empty() {
+        let summary: Vec<_> = failures.iter().map(|(n, _)| *n).collect();
+        let first = &failures[0];
+        panic!(
+            "{}/{} corpus files diverged:\n  {:?}\nfirst failure ({}):\n{}",
+            failures.len(),
+            CORPUS_44_STEREO.len(),
+            summary,
+            first.0,
+            first.1
+        );
+    }
 }

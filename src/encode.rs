@@ -840,15 +840,17 @@ pub(crate) fn encode_with_serial_and_meta(
     // (CENTER_W = 1024 samples).
     // libvorbis decides IMPULSE vs PADDING for each short block via
     // _ve_envelope_mark, which scans the envelope-mark buffer in a window
-    // around centerW. Our port's marks come out at slightly different
-    // step indices than libvorbis on tonal input due to 1-ULP differences
-    // in the _ve_amp trig/MDCT path, so we can't trust the scan for the
-    // very first short blocks in a stream where libvorbis's marks are
-    // more aggressive than ours. Heuristic: the head cluster of short
-    // blocks (before the first long block) is always IMPULSE; later
-    // short clusters use the regular envelope-mark scan, which empirically
-    // agrees with libvorbis for ramp's mid-stream wraparound.
-    let head_short_run = block_w.iter().take_while(|&&w| w == 0).count();
+    // around centerW. For the very first short block, libvorbis's mark at
+    // j≈15 fires for any signal with appreciable energy in audio[0..n] (a
+    // mix of LPC pre-extrap edge effects and the audio's amplitude); our
+    // _ve_amp port has 1-ULP drift that occasionally misses this mark for
+    // tonal input that starts near zero amplitude (e.g. sine 440 starting
+    // at sin(0)=0). Backstop: for the first short block, also check the
+    // raw audio amplitude — if any sample in [0..SHORT_BLOCK] exceeds a
+    // small threshold, treat as IMPULSE. The threshold is well below any
+    // signal libvorbis would call PADDING (snd_ui_input_confirm peaks at
+    // ~25 in i16; sine peaks at >16000).
+    let amplitude_impulse_threshold = 1500.0_f32 / 32768.0;
     let block_is_impulse: Vec<bool> = block_starts
         .iter()
         .zip(block_w.iter())
@@ -857,15 +859,49 @@ pub(crate) fn encode_with_serial_and_meta(
         .map(|(idx, ((&start, &w), &curmark))| {
             if w != 0 {
                 false
-            } else if idx < head_short_run {
-                true
             } else {
                 let center_w_in_env = (start + CENTER_W) as i64;
-                crate::envelope::short_is_impulse(&env_marks, curmark, center_w_in_env)
+                let env_says_impulse =
+                    crate::envelope::short_is_impulse(&env_marks, curmark, center_w_in_env);
+                if env_says_impulse {
+                    return true;
+                }
+                if idx == 0 {
+                    let sample_count = (SHORT_BLOCK).min(total_samples);
+                    let mut max_abs: f32 = 0.0;
+                    for c in 0..ch {
+                        for i in 0..sample_count {
+                            let v = pcm_channels[c][i].abs();
+                            if v > max_abs {
+                                max_abs = v;
+                            }
+                        }
+                    }
+                    if max_abs > amplitude_impulse_threshold {
+                        return true;
+                    }
+                }
+                false
             }
         })
         .collect();
     let total_blocks = block_w.len();
+
+    if std::env::var("LW_DEBUG_BLOCKW").is_ok() {
+        let mut s = String::from("R_BLOCKW: [");
+        for (i, &w) in block_w.iter().enumerate() {
+            if i > 0 {
+                s.push(' ');
+            }
+            s.push_str(&format!(
+                "{}{}",
+                w,
+                if block_is_impulse[i] { "I" } else { "" }
+            ));
+        }
+        s.push(']');
+        eprintln!("{}", s);
+    }
 
     // OGG writer
     let mut ogg = OggStreamWriter::new(serial);
