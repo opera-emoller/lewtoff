@@ -18,6 +18,7 @@
 #include <math.h>
 #include <string.h>
 #include <stdio.h>
+#include <stdint.h>
 #include "vorbis/codec.h"
 #include "codec_internal.h"
 
@@ -153,6 +154,21 @@ static float ***setup_tone_curves(float curveatt_dB[P_BANDS],float binHz,int n,
     for(j=1;j<P_LEVELS;j++){
       min_curve(athc[j],athc[j-1]);
       min_curve(workc[i][j],athc[j]);
+    }
+  }
+
+  /* DEBUG: dump workc after all setup steps */
+  {
+    static int fired = 0;
+    if (!fired) {
+      fired = 1;
+      FILE *fff = fopen("/tmp/lewtoff-debug/c_workc.bin", "wb");
+      if (fff) {
+        for(int b=0;b<P_BANDS;b++)
+          for(int lv=0;lv<P_LEVELS;lv++)
+            fwrite(workc[b][lv], sizeof(float), EHMER_MAX, fff);
+        fclose(fff);
+      }
     }
   }
 
@@ -327,6 +343,37 @@ void _vp_psy_init(vorbis_look_psy *p,vorbis_info_psy *vi,
   for(i=0;i<n;i++)
     p->octave[i]=toOC((i+.25f)*.5*rate/n)*(1<<(p->shiftoc+1))+.5f;
 
+  /* DEBUG: dump curveatt_db (toneatt) */
+  {
+    static int afired=0;
+    if(!afired){
+      afired=1;
+      FILE *fff=fopen("/tmp/lewtoff-debug/c_toneatt.bin","wb");
+      if(fff){ fwrite(vi->toneatt, sizeof(float), 17, fff); fclose(fff); }
+      fprintf(stderr, "C_TONEATT[10]=%f, centerboost=%f, decay=%f\n",
+              vi->toneatt[10], vi->tone_centerboost, vi->tone_decay);
+      fprintf(stderr, "C_TONE_MASTERATT[0]=0x%08x [1]=0x%08x [2]=0x%08x\n",
+              *(uint32_t*)&vi->tone_masteratt[0],
+              *(uint32_t*)&vi->tone_masteratt[1],
+              *(uint32_t*)&vi->tone_masteratt[2]);
+      fprintf(stderr, "C_NOISEMAXSUPP=0x%08x ATH_ADJATT=0x%08x ATH_MAXATT=0x%08x\n",
+              *(uint32_t*)&vi->noisemaxsupp,
+              *(uint32_t*)&vi->ath_adjatt,
+              *(uint32_t*)&vi->ath_maxatt);
+      fprintf(stderr, "C_TONE_ABS_LIMIT=0x%08x MAX_CURVE_DB=0x%08x\n",
+              *(uint32_t*)&vi->tone_abs_limit,
+              *(uint32_t*)&vi->max_curve_dB);
+      fprintf(stderr, "C_NORMAL_THRESH=0x%016llx (double)\n", *(uint64_t*)&vi->normal_thresh);
+      fprintf(stderr, "C_NOISEWINDOWS=lo=%f hi=%f\n",
+              vi->noisewindowlo, vi->noisewindowhi);
+      fprintf(stderr, "C_NOISECOMPAND[0..5]=");
+      for(int z=0;z<5;z++) fprintf(stderr, "0x%08x ", *(uint32_t*)&vi->noisecompand[z]);
+      fprintf(stderr, "\n");
+      fprintf(stderr, "C_NOISEOFF[1][0..16]=");
+      for(int z=0;z<17;z++) fprintf(stderr, "0x%08x ", *(uint32_t*)&vi->noiseoff[1][z]);
+      fprintf(stderr, "\n");
+    }
+  }
   p->tonecurves=setup_tone_curves(vi->toneatt,rate*.5/n,n,
                                   vi->tone_centerboost,vi->tone_decay);
 

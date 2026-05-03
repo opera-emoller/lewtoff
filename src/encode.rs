@@ -124,17 +124,35 @@ fn make_q5_psy(rate: i64) -> VorbisInfoPsy {
     vi.ath_adjatt = -105.0;
     vi.ath_maxatt = -140.0;
 
-    // Tone mask params from _psy_tone_masteratt_44[6] = {{20,6,-6},0,0}
-    vi.tone_masteratt = [20.0, 6.0, -6.0];
+    // Tone mask params: post-interpolation values from oracle dump for q=0.5
+    // (between row6 [20,6,-6] and row7 [20,3,-10] with ds≈1e-6).
+    vi.tone_masteratt = [20.0, f32::from_bits(0x40bffffa), f32::from_bits(0xc0c00008)];
     vi.tone_centerboost = 0.0;
     vi.tone_decay = 0.0;
-    vi.tone_abs_limit = -30.0; // _psy_tone_suppress[6] = -30
+    vi.tone_abs_limit = f32::from_bits(0xc1f00005); // ~-30.00000381
 
-    // Tone per-band attenuation from _vp_tonemask_adj_longblock[6]
-    // {-16,-16,-16,-16,-16,-16,-16,-15,-14,-14,-14,-12,-8,-4,-2,-2,0}
+    // Tone per-band attenuation: post-interpolation values libvorbis produces for
+    // q=0.5 after its `quality += 0.0000001` adjustment. Bits dumped from the
+    // oracle-encoder; values match the literal table at indices 0..9 + 16, but
+    // 10..15 carry a 1e-5 fraction toward the q=6 row from the interpolation.
     let toneatt = [
-        -16.0f32, -16.0, -16.0, -16.0, -16.0, -16.0, -16.0, -15.0, -14.0, -14.0, -14.0, -12.0,
-        -8.0, -4.0, -2.0, -2.0, 0.0,
+        -16.0f32,
+        -16.0,
+        -16.0,
+        -16.0,
+        -16.0,
+        -16.0,
+        -16.0,
+        -15.0,
+        -14.0,
+        -14.0,
+        f32::from_bits(0xc1500001),
+        f32::from_bits(0xc1300001),
+        f32::from_bits(0xc11ffffe),
+        f32::from_bits(0xbf800018),
+        f32::from_bits(0xbf800008),
+        f32::from_bits(0xb6000000),
+        0.0,
     ];
     vi.toneatt = toneatt;
 
@@ -142,7 +160,7 @@ fn make_q5_psy(rate: i64) -> VorbisInfoPsy {
 
     // Noise mask params
     vi.noisemaskp = 1;
-    vi.noisemaxsupp = -30.0; // _psy_noise_suppress[6] = -30
+    vi.noisemaxsupp = f32::from_bits(0xc1f00005); // ~-30.00000381 from q-interpolation
     vi.noisewindowlo = 0.5;
     vi.noisewindowhi = 0.5;
     vi.noisewindowlomin = 10; // _psy_noiseguards_44[2].lo (long block)
@@ -205,24 +223,41 @@ fn make_q5_psy_impulse(rate: i64) -> VorbisInfoPsy {
 
     vi.blockflag = 0; // short block
 
+    // ath: -105.0 / -140.0 are exact f32 integers
     vi.ath_adjatt = -105.0;
     vi.ath_maxatt = -140.0;
 
-    vi.tone_masteratt = [20.0, 6.0, -6.0];
+    // Interpolated at q=0.5 (ds≈1e-6) between row6 [20, 6, -6] and row7 [20, 3, -10]
+    vi.tone_masteratt = [20.0, f32::from_bits(0x40bffffa), f32::from_bits(0xc0c00008)];
     vi.tone_centerboost = 0.0;
     vi.tone_decay = 0.0;
-    vi.tone_abs_limit = -30.0;
+    vi.tone_abs_limit = f32::from_bits(0xc1f00005); // ~-30.00000381 from interp
 
     let toneatt = [
-        -16.0f32, -16.0, -16.0, -16.0, -16.0, -16.0, -16.0, -15.0, -14.0, -14.0, -14.0, -12.0,
-        -8.0, -4.0, -2.0, -2.0, 0.0,
+        -16.0f32,
+        -16.0,
+        -16.0,
+        -16.0,
+        -16.0,
+        -16.0,
+        -16.0,
+        -15.0,
+        -14.0,
+        -14.0,
+        f32::from_bits(0xc1500001),
+        f32::from_bits(0xc1300001),
+        f32::from_bits(0xc11ffffe),
+        f32::from_bits(0xbf800018),
+        f32::from_bits(0xbf800008),
+        f32::from_bits(0xb6000000),
+        0.0,
     ];
     vi.toneatt = toneatt;
 
     vi.max_curve_dB = 105.0;
 
     vi.noisemaskp = 1;
-    vi.noisemaxsupp = -30.0;
+    vi.noisemaxsupp = f32::from_bits(0xc1f00005);
     vi.noisewindowlo = 0.5;
     vi.noisewindowhi = 0.5;
     vi.noisewindowlomin = 3;
@@ -295,15 +330,30 @@ fn make_q5_psy_short(rate: i64) -> VorbisInfoPsy {
     // Short block tone attenuation from _vp_tonemask_adj_otherblock[6]
     // {-16,-16,-16,-16,-16,-16,-16,-15,-14,-14,-14,-12,-8,-4,-2,-2,0}
     let toneatt = [
-        -16.0f32, -16.0, -16.0, -16.0, -16.0, -16.0, -16.0, -15.0, -14.0, -14.0, -14.0, -12.0,
-        -8.0, -4.0, -2.0, -2.0, 0.0,
+        -16.0f32,
+        -16.0,
+        -16.0,
+        -16.0,
+        -16.0,
+        -16.0,
+        -16.0,
+        -15.0,
+        -14.0,
+        -14.0,
+        f32::from_bits(0xc1500001),
+        f32::from_bits(0xc1300001),
+        f32::from_bits(0xc11ffffe),
+        f32::from_bits(0xbf800018),
+        f32::from_bits(0xbf800008),
+        f32::from_bits(0xb6000000),
+        0.0,
     ];
     vi.toneatt = toneatt;
 
     vi.max_curve_dB = 105.0; // _psy_tone_0dB[6] = 105
 
     vi.noisemaskp = 1;
-    vi.noisemaxsupp = -30.0; // _psy_noise_suppress[6] = -30
+    vi.noisemaxsupp = f32::from_bits(0xc1f00005); // ~-30.00000381 from q-interpolation
     vi.noisewindowlo = 0.5;
     vi.noisewindowhi = 0.5;
     vi.noisewindowlomin = 3; // _psy_noiseguards_44[1].lo = 3
@@ -376,15 +426,30 @@ fn make_q5_psy_transition(rate: i64) -> VorbisInfoPsy {
     // Tone per-band attenuation from _vp_tonemask_adj_otherblock[6]
     // {-16,-16,-16,-16,-16,-16,-16,-15,-14,-14,-14,-12,-8,-4,-2,-2,0}
     let toneatt = [
-        -16.0f32, -16.0, -16.0, -16.0, -16.0, -16.0, -16.0, -15.0, -14.0, -14.0, -14.0, -12.0,
-        -8.0, -4.0, -2.0, -2.0, 0.0,
+        -16.0f32,
+        -16.0,
+        -16.0,
+        -16.0,
+        -16.0,
+        -16.0,
+        -16.0,
+        -15.0,
+        -14.0,
+        -14.0,
+        f32::from_bits(0xc1500001),
+        f32::from_bits(0xc1300001),
+        f32::from_bits(0xc11ffffe),
+        f32::from_bits(0xbf800018),
+        f32::from_bits(0xbf800008),
+        f32::from_bits(0xb6000000),
+        0.0,
     ];
     vi.toneatt = toneatt;
 
     vi.max_curve_dB = 105.0;
 
     vi.noisemaskp = 1;
-    vi.noisemaxsupp = -30.0;
+    vi.noisemaxsupp = f32::from_bits(0xc1f00005);
     vi.noisewindowlo = 0.5;
     vi.noisewindowhi = 0.5;
     vi.noisewindowlomin = 10;

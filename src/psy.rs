@@ -304,6 +304,22 @@ fn setup_tone_curves(
         }
     }
 
+    if std::env::var("LEWTOFF_DEBUG_DUMP").is_ok() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        static FIRED: AtomicBool = AtomicBool::new(false);
+        if !FIRED.swap(true, Ordering::Relaxed) {
+            let mut bytes = Vec::new();
+            for b in 0..P_BANDS {
+                for lv in 0..P_LEVELS {
+                    for v in workc[b][lv].iter() {
+                        bytes.extend_from_slice(&v.to_le_bytes());
+                    }
+                }
+            }
+            let _ = std::fs::write("/tmp/lewtoff-debug/r_workc.bin", &bytes);
+        }
+    }
+
     for i in 0..P_BANDS {
         // C does these arg computations in f64 (literals are double), casts to
         // float only at the fromOC()/toOC() call boundary. Mirror that.
