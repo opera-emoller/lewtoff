@@ -167,22 +167,51 @@ fn make_q5_psy(rate: i64) -> VorbisInfoPsy {
     vi.noisewindowhimin = 10; // _psy_noiseguards_44[2].hi
     vi.noisewindowfixed = 100; // _psy_noiseguards_44[2].fixed
 
-    // Noise offsets from _psy_noisebias_long[6] (C-index 6, label "5") after
-    // vorbis_encode_noisebias_setup clamping: min = noiseoff[j][0]+6, userbias=0.
-    // raw curve 0: {-15,-15,-15,-15,-15,-15,-15,-10,-4,1,1,1,2,3,3,4,7}, min=-9
-    // raw curve 1: {-22,-22,-22,-22,-22,-22,-22,-16,-12,-6,-4,-4,-4,-4,-3,-1,0}, min=-16
-    // raw curve 2: {-24,-24,-24,-24,-24,-24,-24,-18,-14,-12,-12,-12,-12,-10,-10,-9,-8}, min=-18
+    // Noise offsets dumped from libvorbis psy[3] (block=3, LONG MAINLINE) after
+    // vorbis_encode_noisebias_setup interpolation+clamp at q=0.5+ε. Values
+    // include sub-ULP perturbations from the q-interpolation; raw curves come
+    // from _psy_noisebias_long[6]/[7].
     let noiseoff_0: [f32; P_BANDS] = [
         -9.0, -9.0, -9.0, -9.0, -9.0, -9.0, -9.0, -9.0, -4.0, 1.0, 1.0, 1.0, 2.0, 3.0, 3.0, 4.0,
         7.0,
     ];
     let noiseoff_1: [f32; P_BANDS] = [
-        -16.0, -16.0, -16.0, -16.0, -16.0, -16.0, -16.0, -16.0, -12.0, -6.0, -4.0, -4.0, -4.0,
-        -4.0, -3.0, -1.0, 0.0,
+        f32::from_bits(0xc1800001),
+        f32::from_bits(0xc1800001),
+        f32::from_bits(0xc1800001),
+        f32::from_bits(0xc1800001),
+        f32::from_bits(0xc1800001),
+        f32::from_bits(0xc1800001),
+        f32::from_bits(0xc1800001),
+        f32::from_bits(0xc1800001),
+        f32::from_bits(0xc1400002),
+        f32::from_bits(0xc0c00004),
+        f32::from_bits(0xc0800004),
+        f32::from_bits(0xc0800004),
+        f32::from_bits(0xc0800004),
+        f32::from_bits(0xc0800004),
+        f32::from_bits(0xc0400008),
+        f32::from_bits(0xbf800008),
+        0.0,
     ];
     let noiseoff_2: [f32; P_BANDS] = [
-        -18.0, -18.0, -18.0, -18.0, -18.0, -18.0, -18.0, -18.0, -14.0, -12.0, -12.0, -12.0, -12.0,
-        -10.0, -10.0, -9.0, -8.0,
+        f32::from_bits(0xc1900001),
+        f32::from_bits(0xc1900001),
+        f32::from_bits(0xc1900001),
+        f32::from_bits(0xc1900001),
+        f32::from_bits(0xc1900001),
+        f32::from_bits(0xc1900001),
+        f32::from_bits(0xc1900001),
+        f32::from_bits(0xc1900000),
+        f32::from_bits(0xc1600002),
+        f32::from_bits(0xc1400003),
+        f32::from_bits(0xc1400003),
+        f32::from_bits(0xc1400003),
+        f32::from_bits(0xc1400003),
+        f32::from_bits(0xc1200003),
+        f32::from_bits(0xc1200003),
+        f32::from_bits(0xc1100003),
+        f32::from_bits(0xc1000002),
     ];
     vi.noiseoff[0] = noiseoff_0;
     vi.noiseoff[1] = noiseoff_1;
@@ -488,22 +517,51 @@ fn make_q5_psy_transition(rate: i64) -> VorbisInfoPsy {
     vi.noisewindowhimin = 10;
     vi.noisewindowfixed = 100;
 
-    // Noise offsets from _psy_noisebias_trans[6] (C-index 6, label "5") after
-    // vorbis_encode_noisebias_setup clamping: min = noiseoff[j][0]+6, userbias=0.
-    // raw curve 0: {-24,-24,-24,-24,-20,-18,-14,-8,-1,1,1,1,2,3,3,4,7}, min=-18
-    // raw curve 1: {-32,-32,-32,-32,-28,-24,-22,-16,-12,-6,-4,-4,-4,-4,-3,-1,0}, min=-26
-    // raw curve 2: {-34,-34,-34,-34,-30,-24,-24,-18,-14,-12,-12,-12,-12,-10,-10,-9,-5}, min=-28
+    // Noise offsets dumped from libvorbis psy[2] (block=2, LONG TRANSITION)
+    // after vorbis_encode_noisebias_setup interpolation+clamp at q=0.5+ε.
+    // Raw curves come from _psy_noisebias_trans[6]/[7]; sub-ULP perturbations
+    // arise from the q-interpolation.
     let noiseoff_0: [f32; P_BANDS] = [
         -18.0, -18.0, -18.0, -18.0, -18.0, -18.0, -14.0, -8.0, -1.0, 1.0, 1.0, 1.0, 2.0, 3.0, 3.0,
         4.0, 7.0,
     ];
     let noiseoff_1: [f32; P_BANDS] = [
-        -26.0, -26.0, -26.0, -26.0, -26.0, -24.0, -22.0, -16.0, -12.0, -6.0, -4.0, -4.0, -4.0,
-        -4.0, -3.0, -1.0, 0.0,
+        -26.0,
+        -26.0,
+        -26.0,
+        -26.0,
+        -26.0,
+        -24.0,
+        f32::from_bits(0xc1b00001),
+        f32::from_bits(0xc1800001),
+        f32::from_bits(0xc1400002),
+        f32::from_bits(0xc0c00004),
+        f32::from_bits(0xc0800004),
+        f32::from_bits(0xc0800004),
+        f32::from_bits(0xc0800004),
+        f32::from_bits(0xc0800004),
+        f32::from_bits(0xc0400008),
+        f32::from_bits(0xbf800008),
+        0.0,
     ];
     let noiseoff_2: [f32; P_BANDS] = [
-        -28.0, -28.0, -28.0, -28.0, -28.0, -24.0, -24.0, -18.0, -14.0, -12.0, -12.0, -12.0, -12.0,
-        -10.0, -10.0, -9.0, -5.0,
+        -28.0,
+        -28.0,
+        -28.0,
+        -28.0,
+        -28.0,
+        f32::from_bits(0xc1c00001),
+        f32::from_bits(0xc1c00001),
+        f32::from_bits(0xc1900003),
+        f32::from_bits(0xc1600008),
+        f32::from_bits(0xc1400007),
+        f32::from_bits(0xc1400007),
+        f32::from_bits(0xc1400007),
+        f32::from_bits(0xc1400007),
+        f32::from_bits(0xc1200008),
+        f32::from_bits(0xc1200007),
+        f32::from_bits(0xc1100007),
+        f32::from_bits(0xc0a0000e),
     ];
     vi.noiseoff[0] = noiseoff_0;
     vi.noiseoff[1] = noiseoff_1;
