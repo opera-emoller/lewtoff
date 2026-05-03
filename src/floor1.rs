@@ -1231,6 +1231,23 @@ pub(crate) fn floor1_encode(
             }
         }
 
+        if std::env::var("LW_DEBUG_FLOOR_PART").is_ok() {
+            use std::sync::atomic::{AtomicBool, Ordering};
+            static FIRED: AtomicBool = AtomicBool::new(false);
+            if !FIRED.swap(true, Ordering::Relaxed) {
+                let mut s = format!("R_FLOOR_OUT posts={}:", posts);
+                for z in 0..posts as usize {
+                    s.push_str(&format!(" {}", out[z]));
+                }
+                eprintln!("{}", s);
+                let mut s = format!("R_FLOOR_POSTQ posts={}:", posts);
+                for z in 0..posts as usize {
+                    s.push_str(&format!(" {}", post[z]));
+                }
+                eprintln!("{}", s);
+            }
+        }
+
         // we have everything we need. pack it out
         // mark nontrivial floor
         opb.write(1, 1);
@@ -1252,6 +1269,19 @@ pub(crate) fn floor1_encode(
             let mut bookas = [0usize; 8];
             let mut cval: usize = 0;
             let mut cshift: usize = 0;
+
+            let part_dbg = std::env::var("LW_DEBUG_FLOOR_PART").is_ok();
+            if part_dbg {
+                use std::sync::atomic::{AtomicUsize, Ordering};
+                static N: AtomicUsize = AtomicUsize::new(0);
+                let n = N.fetch_add(1, Ordering::Relaxed);
+                if n < 10 {
+                    eprintln!(
+                        "R_FLOOR_PART i={} class={} cdim={} csubbits={}",
+                        i, class, cdim, csubbits
+                    );
+                }
+            }
 
             // generate the partition's first stage cascade value
             if csubbits != 0 {
@@ -1275,6 +1305,17 @@ pub(crate) fn floor1_encode(
                     cval |= bookas[k] << cshift;
                     cshift += csubbits;
                 }
+                if part_dbg {
+                    use std::sync::atomic::{AtomicUsize, Ordering};
+                    static N: AtomicUsize = AtomicUsize::new(0);
+                    let n = N.fetch_add(1, Ordering::Relaxed);
+                    if n < 8 {
+                        eprintln!(
+                            "R_FLOOR_CVAL i={} class={} cval={} class_book={}",
+                            i, class, cval, info.class_book[class]
+                        );
+                    }
+                }
                 // write it
                 let phrase_bits = books[info.class_book[class] as usize].encode(cval, opb);
                 look.phrasebits += phrase_bits as i64;
@@ -1285,8 +1326,39 @@ pub(crate) fn floor1_encode(
                 let book = info.class_subbook[class][bookas[k]];
                 if book >= 0 {
                     let book = book as usize;
+                    if part_dbg {
+                        use std::sync::atomic::{AtomicUsize, Ordering};
+                        static N: AtomicUsize = AtomicUsize::new(0);
+                        let n = N.fetch_add(1, Ordering::Relaxed);
+                        if n < 20 {
+                            eprintln!(
+                                "R_FLOOR_POSTV i={} k={} cdim={} j+k={} out={} book={} entries={}",
+                                i,
+                                k,
+                                cdim,
+                                j + k,
+                                out[j + k],
+                                book,
+                                books[book].entries
+                            );
+                        }
+                    }
                     // hack to allow training with 'bad' books
                     if out[j + k] < books[book].entries as i32 {
+                        if part_dbg {
+                            let entry = out[j + k] as usize;
+                            let cw = books[book].codewords[entry];
+                            let cl = books[book].codeword_lengths[entry];
+                            use std::sync::atomic::{AtomicUsize, Ordering};
+                            static N: AtomicUsize = AtomicUsize::new(0);
+                            let n = N.fetch_add(1, Ordering::Relaxed);
+                            if n < 8 {
+                                eprintln!(
+                                    "R_POSTV_CW i={} k={} book={} entry={} codeword=0x{:08x} len={}",
+                                    i, k, book, entry, cw, cl
+                                );
+                            }
+                        }
                         let post_bits = books[book].encode(out[j + k] as usize, opb);
                         look.postbits += post_bits as i64;
                     }

@@ -105,6 +105,18 @@ pub(crate) fn mapping0_forward(
             eprintln!("LW_WINDOWED_PCM ch={} n={}: [{}]", i, n, vals.join(","));
         }
     }
+    if std::env::var("LW_DEBUG_PCM_LAST").is_ok() && n == LONG_BLOCK {
+        let mut s = format!("LW_WINDOWED_LAST n={}:", n);
+        for j in (0..n).step_by(64) {
+            s.push_str(&format!(
+                " [{}]={:.6e}(0x{:08x})",
+                j,
+                pcm_blocks[0][j],
+                pcm_blocks[0][j].to_bits()
+            ));
+        }
+        eprintln!("{}", s);
+    }
     // Apply window (already done by caller), MDCT, and compute log-FFT approx
     // Port of: lines 254-360 in mapping0.c
     for i in 0..channels {

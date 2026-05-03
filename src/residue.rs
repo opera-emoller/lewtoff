@@ -371,8 +371,39 @@ fn _encodepart(opb: &mut BitWriter, vec: &mut [i32], n: usize, book: &Codebook) 
     let dim = book.dim;
     let step = n / dim;
 
+    let dbg = std::env::var("LW_DEBUG_BESTERR2").is_ok();
+
     for i in 0..step {
+        let mut vec_in_copy = [0i32; 64];
+        let copy_dim = dim.min(64);
+        if dbg {
+            for z in 0..copy_dim {
+                vec_in_copy[z] = vec[i * dim + z];
+            }
+        }
+
         let entry = local_book_besterror(book, &mut vec[i * dim..]);
+
+        if dbg {
+            use std::sync::atomic::{AtomicUsize, Ordering};
+            static N: AtomicUsize = AtomicUsize::new(0);
+            let n = N.fetch_add(1, Ordering::Relaxed);
+            if n < 60 {
+                let mut s = format!(
+                    "R_BESTERR n={} dim={} step_i={} entry={} vec_in=[",
+                    n, dim, i, entry
+                );
+                for z in 0..copy_dim {
+                    s.push_str(&format!("{} ", vec_in_copy[z]));
+                }
+                s.push_str("] vec_residual=[");
+                for z in 0..copy_dim {
+                    s.push_str(&format!("{} ", vec[i * dim + z]));
+                }
+                s.push(']');
+                eprintln!("{}", s);
+            }
+        }
 
         bits += vorbis_book_encode(book, entry, opb) as i32;
     }

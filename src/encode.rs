@@ -642,6 +642,44 @@ fn preextrapolate_channel(pcm: &[f32]) -> [f32; CENTER_W] {
     result
 }
 
+/// Port of libvorbis post-stream LPC extrapolation (block.c lines 487-527).
+///
+/// At EOS, libvorbis predicts `blocksizes[1]*3` samples beyond the actual audio
+/// using LPC of order 32 trained on the last `min(eofflag, blocksizes[1])`
+/// samples. The predictions fill out the right side of the last data block(s)
+/// so the encoder doesn't see a discontinuity from audio to zero.
+const LPC_ORDER_POST: usize = 32;
+const POST_EXTRAPOLATE_LEN: usize = LONG_BLOCK * 3; // libvorbis blocksizes[1]*3 = 6144
+
+fn postextrapolate_channel(pcm: &[f32]) -> Vec<f32> {
+    let eofflag = pcm.len();
+    let mut out = vec![0.0f32; POST_EXTRAPOLATE_LEN];
+
+    if eofflag <= LPC_ORDER_POST * 2 {
+        return out; // libvorbis falls back to zero-fill (memset)
+    }
+
+    let n_train = LONG_BLOCK.min(eofflag);
+    let mut lpc_coeffs = [0.0f32; LPC_ORDER_POST];
+    lpc_from_data(
+        &pcm[eofflag - n_train..eofflag],
+        &mut lpc_coeffs,
+        n_train,
+        LPC_ORDER_POST,
+    );
+
+    let prime: Vec<f32> = pcm[eofflag - LPC_ORDER_POST..eofflag].to_vec();
+    lpc_predict(
+        &lpc_coeffs,
+        &prime,
+        LPC_ORDER_POST,
+        &mut out,
+        POST_EXTRAPOLATE_LEN,
+    );
+
+    out
+}
+
 fn random_serial() -> u32 {
     use std::time::{SystemTime, UNIX_EPOCH};
     let t = SystemTime::now()
@@ -785,6 +823,14 @@ pub(crate) fn encode_with_serial_and_meta(
         win_bufs[c].set_prestream(&prestream[..SHORT_HALF]);
     }
 
+    // Post-stream LPC extrapolation (port of libvorbis EOS handling in block.c
+    // lines 487-527). Predict POST_EXTRAPOLATE_LEN samples beyond total_samples
+    // so the last data block + flush block see LPC-predicted continuations
+    // rather than a hard zero discontinuity.
+    let post_predicted: Vec<Vec<f32>> = (0..ch)
+        .map(|c| postextrapolate_channel(&pcm_channels[c]))
+        .collect();
+
     // Mutable floor states (mapping0_forward needs &mut)
     let mut floor_states: Vec<crate::floor1::Floor1State> = setup
         .floor_states
@@ -873,6 +919,11 @@ pub(crate) fn encode_with_serial_and_meta(
                             for (i, idx) in (pre_start..pre_end).enumerate() {
                                 if idx < total_samples {
                                     pre[i] = pcm_channels[c][idx];
+                                } else {
+                                    let post_idx = idx - total_samples;
+                                    if post_idx < post_predicted[c].len() {
+                                        pre[i] = post_predicted[c][post_idx];
+                                    }
                                 }
                             }
                             pre
@@ -890,6 +941,11 @@ pub(crate) fn encode_with_serial_and_meta(
                         let idx = block_start + i;
                         if idx < total_samples {
                             blk[i] = pcm_channels[c][idx];
+                        } else {
+                            let post_idx = idx - total_samples;
+                            if post_idx < post_predicted[c].len() {
+                                blk[i] = post_predicted[c][post_idx];
+                            }
                         }
                     }
                     blk
