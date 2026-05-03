@@ -162,6 +162,17 @@ impl WindowingBuffer {
         self.prev_long.copy_from_slice(current);
         self.prev_is_long = true;
 
+        // For a long-to-short transition (nw_is_long=false), the next short
+        // block needs prev_short populated from the appropriate samples
+        // straddling the next centerW. centerW advances by LONG_BLOCK/4 +
+        // SHORT_BLOCK/4 = 576 samples, so the next short's left half (128
+        // samples) is current[448..576].
+        if !nw_is_long {
+            let leftbegin = LONG_BLOCK / 4 - SHORT_BLOCK / 4; // 448
+            self.prev_short
+                .copy_from_slice(&current[leftbegin..leftbegin + SHORT_HALF]);
+        }
+
         out
     }
 

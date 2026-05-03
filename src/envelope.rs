@@ -366,6 +366,47 @@ mod tests {
     }
 
     #[test]
+    fn ramp_full_pattern_has_midstream_shorts() {
+        use crate::encode::pre_extrap_for_test;
+        let n = 44100usize;
+        let raw_l: Vec<f32> = (0..n)
+            .map(|i| (((i * 2) % 65536) as i32 - 32768) as f32 / 32768.0)
+            .collect();
+        let raw_r: Vec<f32> = (0..n)
+            .map(|i| (((i * 2 + 1) % 65536) as i32 - 32768) as f32 / 32768.0)
+            .collect();
+        let pcm: Vec<Vec<f32>> = [&raw_l, &raw_r]
+            .iter()
+            .map(|raw| {
+                let mut buf = Vec::with_capacity(1024 + raw.len());
+                let pre = pre_extrap_for_test(&raw[..2112.min(raw.len())]);
+                let mut pre_rev = vec![0.0f32; 1024];
+                for k in 0..1024 {
+                    pre_rev[1024 - 1 - k] = pre[k];
+                }
+                buf.extend_from_slice(&pre_rev);
+                buf.extend_from_slice(raw);
+                buf
+            })
+            .collect();
+        let gi = make_q5_global();
+        let marks = compute_marks(&pcm, &gi);
+        // n_samples here is the audio buffer length (including the LPC
+        // pre-stream prefix that envelope detection saw).
+        let pattern = full_w_pattern(&marks, pcm[0].len() as i64);
+        let n_short = pattern.iter().filter(|&&w| w == 0).count();
+        eprintln!(
+            "ramp pattern len={} n_short={} pattern={:?}",
+            pattern.len(),
+            n_short,
+            pattern
+        );
+        // Expect at least one mid-stream short cluster (= more than the 2
+        // initial short blocks).
+        assert!(n_short > 4, "ramp must have mid-stream short blocks");
+    }
+
+    #[test]
     fn ramp_two_short() {
         // libvorbis envelope detection runs on the pre-extrapolated PCM
         // buffer: 1024 LPC-predicted virtual samples (centerW) + audio. Mirror
@@ -434,7 +475,92 @@ pub fn n_short_blocks_at_start(marks: &[bool]) -> usize {
     1
 }
 
-/// Reproduce libvorbis's W-flag decision for a sequence of blocks.
+/// Reproduce libvorbis's per-block nW decision from envelope marks.
+///
+/// Mirrors `_ve_envelope_search`: given the current `centerW`, current `W`
+/// and the cursor position, walk forward through marks to find the next
+/// mark in (centerW, testW). If found → nW=0 (short next). If testW reached
+/// first → nW=1 (long next). If neither (cursor runs out of marks) → nW=-1
+/// (insufficient data, defer).
+///
+/// Returns (nW, new_cursor). nW: 0=short, 1=long, -1=insufficient.
+pub fn next_w(marks: &[bool], cursor: i64, center_w: i64, w: i32) -> (i32, i64) {
+    let bs0 = SHORT_BLOCK as i64;
+    let bs1 = LONG_BLOCK as i64;
+    let step = ENV_SEARCHSTEP as i64;
+    let test_w = center_w + (if w == 1 { bs1 } else { bs0 }) / 4 + bs1 / 2 + bs0 / 4;
+
+    let mut j = cursor;
+    let limit = marks.len() as i64 * step;
+
+    while j < limit - step {
+        if j >= test_w {
+            return (1, j);
+        }
+        let idx = (j / step) as usize;
+        if idx < marks.len() && marks[idx] && j > center_w {
+            // Mark found in (centerW, testW). Per libvorbis, double-check
+            // testW one more time (the C code repeats the check).
+            if j >= test_w {
+                return (1, j);
+            }
+            return (0, j);
+        }
+        j += step;
+    }
+    (-1, j)
+}
+
+/// Pre-compute the W-flag pattern for the entire stream.
+///
+/// Returns a Vec<i32> where each entry is the W flag (0=short, 1=long) for
+/// that block, advancing centerW per the libvorbis state machine.
+///
+/// `n_samples` includes any post-extrapolated tail (so blocks past EOS are
+/// also decided).
+pub fn full_w_pattern(marks: &[bool], n_samples: i64) -> Vec<i32> {
+    let bs0 = SHORT_BLOCK as i64;
+    let bs1 = LONG_BLOCK as i64;
+
+    // Initial state mirrors libvorbis init:
+    //   v->W = 0, v->lW = 0, v->nW = 0, v->centerW = bs1/2 = 1024
+    //   ve->cursor = bs1/2 = 1024
+    let mut center_w: i64 = bs1 / 2;
+    let mut cursor: i64 = bs1 / 2;
+    let mut w: i32 = 0;
+
+    let mut pattern: Vec<i32> = Vec::new();
+    pattern.push(0); // first block is always short (W=0 in init)
+
+    loop {
+        // Decide next block's W. If next_w returns -1 (insufficient data /
+        // no upcoming mark), default to long (= what libvorbis settles on
+        // once data accumulates). At true EOS the last block becomes short
+        // via the same default — see how libvorbis sets nW=0 at eofflag.
+        let (next, new_cursor) = next_w(marks, cursor, center_w, w);
+        cursor = new_cursor;
+        let nw = if next == -1 { 1 } else { next };
+
+        // Advance centerW by bs[W]/4 + bs[nW]/4.
+        let advance = (if w == 1 { bs1 } else { bs0 }) / 4 + (if nw == 1 { bs1 } else { bs0 }) / 4;
+        let new_center_w = center_w + advance;
+
+        // Emit the next block (with the new W flag).
+        pattern.push(nw);
+
+        // Stop when centerW has advanced past the audio.
+        if new_center_w >= n_samples {
+            break;
+        }
+
+        center_w = new_center_w;
+        w = nw;
+    }
+
+    pattern
+}
+
+/// Old, simplified pattern extractor — kept for reference.
 ///
 /// Returns a vec of bool: true = long block (W=1), false = short (W=0).
 /// Mirrors `_ve_envelope_search` semantics: at each centerW, look ahead

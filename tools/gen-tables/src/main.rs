@@ -348,10 +348,41 @@ fn main() {
     );
     win_out.push_str("#![allow(clippy::excessive_precision)]\n\n");
 
-    let window_2048 = gen_window(2048);
+    // Load libvorbis's exact window values from /tmp/c_vwin{256,2048}.bin
+    // (run tools/oracle-encoder/dump_window_tables to regenerate). These
+    // come from the f32 literals in libvorbis's window.c which differ
+    // by hundreds of ULPs from formula-regenerated values at the window
+    // edge — critical for ramp/DC-heavy MDCT bin 0.
+    fn load_f32_bin(path: &str, count: usize) -> Vec<f32> {
+        let bytes = std::fs::read(path).unwrap_or_else(|_| {
+            panic!("missing {path}; run tools/oracle-encoder/dump_window_tables first");
+        });
+        assert_eq!(bytes.len(), count * 4, "{path} size mismatch");
+        bytes
+            .chunks_exact(4)
+            .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+            .collect()
+    }
+
+    // libvorbis vwin{N} stores N/2 floats — the rising half of the symmetric
+    // window. Reconstruct the full N-element SIN_WINDOW_* from it by
+    // mirroring: SIN_WINDOW[N-1-i] = SIN_WINDOW[i] = vwin[i] for i in 0..N/2.
+    fn full_from_half(half: &[f32], n: usize) -> Vec<f32> {
+        assert_eq!(half.len(), n / 2);
+        let mut full = vec![0.0f32; n];
+        for i in 0..n / 2 {
+            full[i] = half[i];
+            full[n - 1 - i] = half[i];
+        }
+        full
+    }
+
+    let half_2048 = load_f32_bin("/tmp/c_vwin2048.bin", 1024);
+    let window_2048 = full_from_half(&half_2048, 2048);
     write_window_table(&mut win_out, "2048", &window_2048);
 
-    let window_256 = gen_window(256);
+    let half_256 = load_f32_bin("/tmp/c_vwin256.bin", 128);
+    let window_256 = full_from_half(&half_256, 256);
     write_window_table(&mut win_out, "256", &window_256);
 
     // Also generate the half-window for n=256 short block transitions.
@@ -365,13 +396,10 @@ fn main() {
     // vwin128 is used for blocksizes[0]=256. It has 128 values = 256/2.
     // The formula: vwin128[i] = sin(pi/2 * sin^2(pi * (i+0.5) / 256))
     // We generate WIN_HALF_256 (128 values) for this purpose.
+    // WIN_HALF_256 = first half of libvorbis vwin256 (= the rising half).
+    // Apply matches libvorbis's d[i] *= windowLW[p] for left-half application.
     let n_short = 256usize;
-    let win_half_256: Vec<f32> = (0..n_short / 2)
-        .map(|i| {
-            let s = (PI * (i as f64 + 0.5) / n_short as f64).sin();
-            (0.5 * PI * s * s).sin() as f32
-        })
-        .collect();
+    let win_half_256: Vec<f32> = window_256[..n_short / 2].to_vec();
     win_out.push_str(&format!(
         "pub static WIN_HALF_256: [f32; {}] = [\n",
         win_half_256.len()
@@ -394,12 +422,7 @@ fn main() {
 
     // Also generate WIN_HALF_2048 (1024 values) for the long block transition window.
     let n_long = 2048usize;
-    let win_half_2048: Vec<f32> = (0..n_long / 2)
-        .map(|i| {
-            let s = (PI * (i as f64 + 0.5) / n_long as f64).sin();
-            (0.5 * PI * s * s).sin() as f32
-        })
-        .collect();
+    let win_half_2048: Vec<f32> = window_2048[..n_long / 2].to_vec();
     win_out.push_str(&format!(
         "pub static WIN_HALF_2048: [f32; {}] = [\n",
         win_half_2048.len()

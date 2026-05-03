@@ -106,7 +106,21 @@ pub(crate) fn mapping0_forward(
         }
     }
     if std::env::var("LW_DEBUG_PCM_LAST").is_ok() && n == LONG_BLOCK {
-        let mut s = format!("LW_WINDOWED_LAST n={}:", n);
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static N: AtomicUsize = AtomicUsize::new(0);
+        let idx = N.fetch_add(1, Ordering::Relaxed);
+        if idx == 30 {
+            // Detailed dump for packet 35 / block 32 (long transition before
+            // mid-stream short cluster).
+            for j in 0..n {
+                eprintln!(
+                    "LW_WINDOWED_DETAIL[{}]=0x{:08x}",
+                    j,
+                    pcm_blocks[0][j].to_bits()
+                );
+            }
+        }
+        let mut s = format!("LW_WINDOWED_LAST idx={} n={}:", idx, n);
         for j in (0..n).step_by(64) {
             s.push_str(&format!(
                 " [{}]={:.6e}(0x{:08x})",

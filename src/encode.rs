@@ -781,17 +781,16 @@ pub(crate) fn encode_with_serial_and_meta(
     // n_short_blocks is determined by running envelope detection on the
     // pre-extrapolated PCM buffer (LPC virtual pre-stream + audio); see
     // envelope.rs for the port.
-    let n_short_blocks: usize = {
-        // Build the pre-extrapolated buffer for envelope detection: 1024
-        // virtual samples (LPC) + audio. Match libvorbis's `v->pcm[i]`
-        // layout where pcm[0..centerW] = LPC pre-extrap and
-        // pcm[centerW..] = real audio.
+    // Pre-compute the W-flag sequence for the entire stream by running
+    // libvorbis's envelope-driven `_ve_envelope_search` rule across all
+    // marks. The pattern is a Vec<i32> of 0=short / 1=long, one entry per
+    // emitted block (including any EOS flush blocks).
+    let block_w: Vec<i32> = {
         let lpc_train_end = 2112usize.min(total_samples);
         let mut env_pcm: Vec<Vec<f32>> = Vec::with_capacity(ch);
         for c in 0..ch {
             let pre = preextrapolate_channel(&pcm_channels[c][..lpc_train_end]);
             let mut buf = Vec::with_capacity(CENTER_W + total_samples);
-            // pre[k] = virtual sample at -(k+1); reverse for chronological order.
             for k in 0..CENTER_W {
                 buf.push(pre[CENTER_W - 1 - k]);
             }
@@ -799,13 +798,40 @@ pub(crate) fn encode_with_serial_and_meta(
             env_pcm.push(buf);
         }
         let marks = crate::envelope::compute_marks(&env_pcm, &gi);
-        crate::envelope::n_short_blocks_at_start(&marks)
+        // n_samples for the pattern is the buffer length (LPC pre + audio).
+        crate::envelope::full_w_pattern(&marks, env_pcm[0].len() as i64)
     };
-    let first_long_start: usize =
-        (n_short_blocks - 1) * SHORT_HALF + SHORT_BLOCK / 4 + LONG_BLOCK / 4;
-    let remaining_after_transition = total_samples.saturating_sub(first_long_start);
-    let long_data_blocks = remaining_after_transition.div_ceil(LONG_HALF);
-    let total_blocks = n_short_blocks + long_data_blocks + 1; // +1 flush block
+
+    // Map W-flag sequence to per-block sample positions (block_start). Each
+    // block reads `bs[W]/2` "current half" samples starting at block_start.
+    // block_start advances by `bs[prev_W]/4 + bs[W]/4` from the previous
+    // block's start (libvorbis centerW evolution; first block at 0).
+    let block_starts: Vec<usize> = {
+        let mut starts = Vec::with_capacity(block_w.len());
+        let mut start: i64 = 0;
+        let mut prev_w: i32 = 0;
+        for (i, &w) in block_w.iter().enumerate() {
+            if i == 0 {
+                starts.push(0);
+            } else {
+                let advance = (if prev_w == 1 {
+                    LONG_BLOCK as i64
+                } else {
+                    SHORT_BLOCK as i64
+                }) / 4
+                    + (if w == 1 {
+                        LONG_BLOCK as i64
+                    } else {
+                        SHORT_BLOCK as i64
+                    }) / 4;
+                start += advance;
+                starts.push(start as usize);
+            }
+            prev_w = w;
+        }
+        starts
+    };
+    let total_blocks = block_w.len();
 
     // OGG writer
     let mut ogg = OggStreamWriter::new(serial);
@@ -876,27 +902,52 @@ pub(crate) fn encode_with_serial_and_meta(
     let mut cumulative_granule: u64 = 0;
 
     for block_idx in 0..total_blocks {
-        let is_short = block_idx < n_short_blocks;
+        let cur_w = block_w[block_idx];
+        let prev_w = if block_idx == 0 {
+            0
+        } else {
+            block_w[block_idx - 1]
+        };
+        // For the very last block, libvorbis still records nW=1 in the block
+        // header (the encoder advances centerW past EOS but emits the same
+        // long-default flag). Mirror that here.
+        let next_w = if block_idx + 1 < total_blocks {
+            block_w[block_idx + 1]
+        } else {
+            1
+        };
+        let is_short = cur_w == 0;
         let is_last = block_idx == total_blocks - 1;
 
-        // nW = next block is long: true unless next block is also short
-        let nw_is_long = block_idx >= n_short_blocks - 1;
+        let prev_is_long = prev_w == 1;
+        let nw_is_long = next_w == 1;
+
+        let block_start = block_starts[block_idx];
 
         let windowed_blocks: Vec<Vec<f32>>;
         let block_mode: BlockMode;
         let decoded_samples: u64;
 
+        // Helper to read a sample, falling back to post-extrapolation past EOS.
+        let read_sample = |c: usize, idx: usize| -> f32 {
+            if idx < total_samples {
+                pcm_channels[c][idx]
+            } else {
+                let post_idx = idx - total_samples;
+                if post_idx < post_predicted[c].len() {
+                    post_predicted[c][post_idx]
+                } else {
+                    0.0
+                }
+            }
+        };
+
         if is_short {
-            // Short block: 128 new samples per block
-            let block_start = block_idx * SHORT_HALF;
             let current_blocks_short: Vec<[f32; SHORT_HALF]> = (0..ch)
                 .map(|c| {
                     let mut blk = [0.0f32; SHORT_HALF];
                     for i in 0..SHORT_HALF {
-                        let idx = block_start + i;
-                        if idx < total_samples {
-                            blk[i] = pcm_channels[c][idx];
-                        }
+                        blk[i] = read_sample(c, block_start + i);
                     }
                     blk
                 })
@@ -928,18 +979,12 @@ pub(crate) fn encode_with_serial_and_meta(
                 prev_window: false,
                 next_window: false,
             };
-            // Short block decodes 128 samples
             decoded_samples = SHORT_HALF as u64;
         } else {
-            // Long block. block_start = first_long_start + long_block_index * LONG_HALF.
-            let long_block_index = block_idx - n_short_blocks;
-            let block_start = first_long_start + long_block_index * LONG_HALF;
-
-            let prev_is_long = long_block_index > 0; // first long block's prev is short
-
-            // For the short→long transition (long_block_index==0), the un-windowed middle
-            // section [576..1024] of the analysis frame needs the 448 PCM samples that
-            // precede `block_start` in the stream.
+            // For a long block whose previous block was short, the un-windowed
+            // middle section of the analysis frame needs the 448 samples
+            // preceding `block_start` (= the gap between the prev short
+            // block's right edge and this long block's current half).
             let mid_len = LONG_HALF - (LONG_BLOCK / 4 - SHORT_BLOCK / 4) - SHORT_HALF; // 448
             let pre_current_data: Option<Vec<Vec<f32>>> = if !prev_is_long {
                 Some(
@@ -949,14 +994,7 @@ pub(crate) fn encode_with_serial_and_meta(
                             let pre_end = block_start;
                             let mut pre = vec![0.0f32; mid_len];
                             for (i, idx) in (pre_start..pre_end).enumerate() {
-                                if idx < total_samples {
-                                    pre[i] = pcm_channels[c][idx];
-                                } else {
-                                    let post_idx = idx - total_samples;
-                                    if post_idx < post_predicted[c].len() {
-                                        pre[i] = post_predicted[c][post_idx];
-                                    }
-                                }
+                                pre[i] = read_sample(c, idx);
                             }
                             pre
                         })
@@ -970,15 +1008,7 @@ pub(crate) fn encode_with_serial_and_meta(
                 .map(|c| {
                     let mut blk = [0.0f32; LONG_HALF];
                     for i in 0..LONG_HALF {
-                        let idx = block_start + i;
-                        if idx < total_samples {
-                            blk[i] = pcm_channels[c][idx];
-                        } else {
-                            let post_idx = idx - total_samples;
-                            if post_idx < post_predicted[c].len() {
-                                blk[i] = post_predicted[c][post_idx];
-                            }
-                        }
+                        blk[i] = read_sample(c, block_start + i);
                     }
                     blk
                 })
