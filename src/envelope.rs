@@ -1,0 +1,499 @@
+//! Port of libvorbis lib/envelope.{h,c} for transient detection.
+//!
+//! libvorbis decides per-block whether to use short or long block size based
+//! on a 7-band envelope analysis run on a small (n=128) MDCT of overlapping
+//! 64-sample windows. Without this, ramp/transient inputs encode as long
+//! blocks where libvorbis would emit short impulse blocks.
+//!
+//! This module mirrors `_ve_envelope_init`, `_ve_amp`, `_ve_envelope_search`
+//! and `_ve_envelope_mark` enough to produce the same W-flag sequence that
+//! libvorbis would emit for a given input. Numeric details (constants,
+//! orderings, decay value, +-99999 sentinels) are kept literal.
+//!
+//! Used by `encode.rs` to pre-compute the block-size sequence so the linear
+//! block loop matches libvorbis's streaming-model output.
+#![allow(non_snake_case)]
+#![allow(clippy::needless_range_loop)]
+#![allow(clippy::excessive_precision)]
+#![allow(clippy::items_after_test_module)]
+#![allow(dead_code)]
+
+use crate::mdct::mdct_forward_envelope;
+use crate::psy::VorbisInfoPsyGlobal;
+use crate::window::{LONG_BLOCK, SHORT_BLOCK};
+
+pub const VE_PRE: usize = 16;
+pub const VE_WIN: usize = 4;
+pub const VE_POST: usize = 2;
+pub const VE_AMP: usize = VE_PRE + VE_POST - 1;
+pub const VE_BANDS: usize = 7;
+pub const VE_NEARDC: usize = 15;
+pub const VE_MINSTRETCH: i32 = 2;
+pub const VE_MAXSTRETCH: i32 = 12;
+
+const ENV_WINLENGTH: usize = 128;
+const ENV_SEARCHSTEP: usize = 64;
+
+#[derive(Clone)]
+struct FilterState {
+    ampbuf: [f32; VE_AMP],
+    ampptr: usize,
+    near_dc: [f32; VE_NEARDC],
+    near_dc_acc: f32,
+    near_dc_partialacc: f32,
+    nearptr: usize,
+}
+
+impl FilterState {
+    fn new() -> Self {
+        Self {
+            ampbuf: [0.0; VE_AMP],
+            ampptr: 0,
+            near_dc: [0.0; VE_NEARDC],
+            near_dc_acc: 0.0,
+            near_dc_partialacc: 0.0,
+            nearptr: 0,
+        }
+    }
+}
+
+struct Band {
+    begin: usize,
+    end: usize,
+    window: Vec<f32>,
+    total: f32,
+}
+
+pub struct EnvelopeLookup {
+    ch: usize,
+    minenergy: f32,
+    mdct_win: [f32; ENV_WINLENGTH],
+    bands: [Band; VE_BANDS],
+    /// `filters[ch * VE_BANDS + band]` = state for that (channel, band).
+    filters: Vec<FilterState>,
+    stretch: i32,
+    /// Envelope marks per searchstep (= 64-sample window). True if a transient
+    /// was detected at that position.
+    pub marks: Vec<bool>,
+}
+
+impl EnvelopeLookup {
+    pub fn new(channels: usize, minenergy: f32) -> Self {
+        let mut mdct_win = [0.0f32; ENV_WINLENGTH];
+        for i in 0..ENV_WINLENGTH {
+            // libvorbis: e->mdct_win[i] = sin(i / (n-1) * PI); then squared.
+            let s = (i as f64 / (ENV_WINLENGTH - 1) as f64 * std::f64::consts::PI).sin();
+            mdct_win[i] = (s * s) as f32;
+        }
+
+        let band_specs: [(usize, usize); VE_BANDS] =
+            [(2, 4), (4, 5), (6, 6), (9, 8), (13, 8), (17, 8), (22, 8)];
+        let bands: Vec<Band> = band_specs
+            .iter()
+            .map(|&(b, e)| {
+                let n = e;
+                let mut win = vec![0.0f32; n];
+                let mut total = 0.0f32;
+                for i in 0..n {
+                    let w = ((i as f64 + 0.5) / n as f64 * std::f64::consts::PI).sin() as f32;
+                    win[i] = w;
+                    total += w;
+                }
+                Band {
+                    begin: b,
+                    end: e,
+                    window: win,
+                    total: 1.0 / total,
+                }
+            })
+            .collect();
+        let bands: [Band; VE_BANDS] = bands.try_into().map_err(|_| ()).expect("VE_BANDS-sized");
+
+        let filters = vec![FilterState::new(); VE_BANDS * channels];
+
+        Self {
+            ch: channels,
+            minenergy,
+            mdct_win,
+            bands,
+            filters,
+            stretch: 0,
+            marks: Vec::new(),
+        }
+    }
+
+    /// Run envelope amplitude analysis on a 128-sample window.
+    /// Updates `self.filters[band_offset..]` in place; returns the trigger
+    /// flags (bit 0 = preecho hi, bit 1 = postecho lo, bit 2 = strong).
+    fn amp(&mut self, gi: &VorbisInfoPsyGlobal, data: &[f32], band_offset: usize) -> i32 {
+        let mut ret = 0i32;
+        let stretch = VE_MINSTRETCH.max(self.stretch / 2);
+        let mut penalty = gi.stretch_penalty - (self.stretch / 2 - VE_MINSTRETCH) as f32;
+        if penalty < 0.0 {
+            penalty = 0.0;
+        }
+        if penalty > gi.stretch_penalty {
+            penalty = gi.stretch_penalty;
+        }
+
+        // window + MDCT in place
+        let mut vec = [0.0f32; ENV_WINLENGTH];
+        for i in 0..ENV_WINLENGTH {
+            vec[i] = data[i] * self.mdct_win[i];
+        }
+        let mut vec_in: [f32; ENV_WINLENGTH] = vec;
+        let mut vec_out = [0.0f32; ENV_WINLENGTH / 2];
+        mdct_forward_envelope(&vec_in, &mut vec_out);
+        // Reuse vec to hold output spread/limited values across band loop:
+        // first half stores spreaded values, second half unused.
+        let _ = &mut vec_in;
+
+        // Near-DC accumulator decay term.
+        let decay_init = {
+            let band0 = self.filters.get_mut(band_offset).unwrap();
+            let temp = vec_out[0] * vec_out[0]
+                + 0.7 * vec_out[1] * vec_out[1]
+                + 0.2 * vec_out[2] * vec_out[2];
+            let ptr = band0.nearptr;
+            let decay;
+            if ptr == 0 {
+                band0.near_dc_acc = band0.near_dc_partialacc + temp;
+                decay = band0.near_dc_acc;
+                band0.near_dc_partialacc = temp;
+            } else {
+                band0.near_dc_acc += temp;
+                decay = band0.near_dc_acc;
+                band0.near_dc_partialacc += temp;
+            }
+            band0.near_dc_acc -= band0.near_dc[ptr];
+            band0.near_dc[ptr] = temp;
+            band0.nearptr += 1;
+            if band0.nearptr >= VE_NEARDC {
+                band0.nearptr = 0;
+            }
+            let decay_scaled = decay * (1.0 / (VE_NEARDC + 1) as f32);
+            // libvorbis's todB(&decay) is 10*log10(decay) (or fast equivalent).
+            // *0.5 then -15 follows.
+            let db = todb(decay_scaled);
+            db * 0.5 - 15.0
+        };
+
+        // Spread + limit. Output stored in vec_out[i>>1] (half-size).
+        let n2 = ENV_WINLENGTH / 2;
+        let mut spread = [0.0f32; ENV_WINLENGTH / 4];
+        let mut decay = decay_init;
+        let minv = self.minenergy;
+        let mut i = 0usize;
+        while i < n2 {
+            let val = vec_out[i] * vec_out[i] + vec_out[i + 1] * vec_out[i + 1];
+            let mut val_db = todb(val) * 0.5;
+            if val_db < decay {
+                val_db = decay;
+            }
+            if val_db < minv {
+                val_db = minv;
+            }
+            spread[i >> 1] = val_db;
+            decay -= 8.0;
+            i += 2;
+        }
+
+        // Per-band trigger detection.
+        for j in 0..VE_BANDS {
+            let band = &self.bands[j];
+            let filter = &mut self.filters[band_offset + j];
+
+            let mut acc = 0.0f32;
+            for k in 0..band.end {
+                acc += spread[k + band.begin] * band.window[k];
+            }
+            acc *= band.total;
+
+            let this = filter.ampptr;
+            let mut p = if this == 0 { VE_AMP - 1 } else { this - 1 };
+            let postmax = acc.max(filter.ampbuf[p]);
+            let postmin = acc.min(filter.ampbuf[p]);
+
+            let mut premax = -99999.0f32;
+            let mut premin = 99999.0f32;
+            for _ in 0..stretch {
+                if p == 0 {
+                    p = VE_AMP - 1;
+                } else {
+                    p -= 1;
+                }
+                if filter.ampbuf[p] > premax {
+                    premax = filter.ampbuf[p];
+                }
+                if filter.ampbuf[p] < premin {
+                    premin = filter.ampbuf[p];
+                }
+            }
+
+            let valmin = postmin - premin;
+            let valmax = postmax - premax;
+
+            filter.ampbuf[this] = acc;
+            filter.ampptr += 1;
+            if filter.ampptr >= VE_AMP {
+                filter.ampptr = 0;
+            }
+
+            if valmax > gi.preecho_thresh[j] + penalty {
+                ret |= 1;
+                ret |= 4;
+            }
+            if valmin < gi.postecho_thresh[j] - penalty {
+                ret |= 2;
+            }
+        }
+
+        ret
+    }
+}
+
+/// libvorbis `todB` for a single value: returns 10*log10(x*x) with a tiny
+/// epsilon to avoid -inf at zero. Match with f32-precision math throughout.
+#[inline]
+fn todb(x: f32) -> f32 {
+    // libvorbis scales.h: todB(x) = (((*(int *)x) - 0x3F800000) * 7.17711438e-7);
+    // i.e. log2(|x|) approximation via IEEE 754 bit hack, scaled to dB.
+    // x is treated as a single-precision float; bits are reinterpreted.
+    // For x=0 the bit-hack returns -1064.0 dB which matches the libvorbis
+    // sentinel value used elsewhere.
+    const VAL: f32 = 7.17711438e-7;
+    let bits = x.to_bits() as i32;
+    (bits - 0x3F80_0000) as f32 * VAL
+}
+
+/// Compute the envelope-mark vector for an entire stream.
+///
+/// This runs `_ve_amp` over each 64-sample step of the input and returns a
+/// boolean per step: true if libvorbis would have set `mark[j]` at that step.
+/// The encoder uses these marks to decide block sizes per the libvorbis
+/// `_ve_envelope_search` rule.
+pub fn compute_marks(pcm_channels: &[Vec<f32>], gi: &VorbisInfoPsyGlobal) -> Vec<bool> {
+    let ch = pcm_channels.len();
+    if ch == 0 {
+        return Vec::new();
+    }
+    let n_samples = pcm_channels[0].len();
+    if n_samples < ENV_WINLENGTH {
+        return Vec::new();
+    }
+
+    let mut e = EnvelopeLookup::new(ch, gi.preecho_minenergy);
+
+    let n_steps = if n_samples >= ENV_WINLENGTH {
+        (n_samples - ENV_WINLENGTH) / ENV_SEARCHSTEP + 1
+    } else {
+        0
+    };
+    let mut marks = vec![false; n_steps + VE_POST + 1];
+
+    let dbg = std::env::var("LW_DEBUG_ENV").is_ok();
+    let mut n_dbg = 0;
+    for j in 0..n_steps {
+        let mut ret = 0i32;
+        e.stretch += 1;
+        if e.stretch > VE_MAXSTRETCH * 2 {
+            e.stretch = VE_MAXSTRETCH * 2;
+        }
+        let off = j * ENV_SEARCHSTEP;
+        for i in 0..ch {
+            let pcm = &pcm_channels[i][off..off + ENV_WINLENGTH];
+            ret |= e.amp(gi, pcm, i * VE_BANDS);
+        }
+        if marks.len() <= j + VE_POST {
+            marks.resize(j + VE_POST + 1, false);
+        }
+        marks[j + VE_POST] = false;
+        if (ret & 1) != 0 {
+            marks[j] = true;
+            if j + 1 < marks.len() {
+                marks[j + 1] = true;
+            }
+        }
+        if (ret & 2) != 0 {
+            marks[j] = true;
+            if j > 0 {
+                marks[j - 1] = true;
+            }
+        }
+        if (ret & 4) != 0 {
+            e.stretch = -1;
+        }
+        if dbg && ret != 0 && n_dbg < 40 {
+            eprintln!("R_ENV_MARK j={} ret={} stretch={}", j, ret, e.stretch);
+            n_dbg += 1;
+        }
+    }
+
+    marks
+}
+
+#[cfg(test)]
+#[allow(clippy::field_reassign_with_default)]
+mod tests {
+    use super::*;
+    use crate::psy::VorbisInfoPsyGlobal;
+
+    fn make_q5_global() -> VorbisInfoPsyGlobal {
+        let mut gi = VorbisInfoPsyGlobal::default();
+        gi.eighth_octave_lines = 8;
+        gi.preecho_thresh = [12.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0];
+        gi.postecho_thresh = [-20.0, -20.0, -15.0, -15.0, -15.0, -15.0, -15.0];
+        gi.stretch_penalty = 0.0;
+        gi.preecho_minenergy = -80.0;
+        gi.ampmax_att_per_sec = -6.0;
+        gi
+    }
+
+    #[test]
+    fn silence_no_marks() {
+        let pcm = vec![vec![0.0f32; 44100]];
+        let gi = make_q5_global();
+        let marks = compute_marks(&pcm, &gi);
+        let first_marks: Vec<usize> = marks
+            .iter()
+            .enumerate()
+            .filter(|(_, &b)| b)
+            .map(|(i, _)| i)
+            .take(10)
+            .collect();
+        eprintln!("silence first marks at indices: {:?}", first_marks);
+        assert_eq!(n_short_blocks_at_start(&marks), 1, "silence: 1 short");
+    }
+
+    #[test]
+    fn ramp_two_short() {
+        // libvorbis envelope detection runs on the pre-extrapolated PCM
+        // buffer: 1024 LPC-predicted virtual samples (centerW) + audio. Mirror
+        // that here so envelope state evolves the same way.
+        use crate::encode::{post_extrap_for_test, pre_extrap_for_test};
+
+        let n = 44100usize;
+        let raw_l: Vec<f32> = (0..n)
+            .map(|i| (((i * 2) % 65536) as i32 - 32768) as f32 / 32768.0)
+            .collect();
+        let raw_r: Vec<f32> = (0..n)
+            .map(|i| (((i * 2 + 1) % 65536) as i32 - 32768) as f32 / 32768.0)
+            .collect();
+        let pcm: Vec<Vec<f32>> = [&raw_l, &raw_r]
+            .iter()
+            .map(|raw| {
+                let mut buf = Vec::with_capacity(1024 + raw.len());
+                let pre = pre_extrap_for_test(&raw[..2112.min(raw.len())]);
+                // pre[k] corresponds to virtual sample at -(k+1); insert
+                // reversed into [0..1024] so that pcm[1024] = audio[0].
+                let mut pre_rev = vec![0.0f32; 1024];
+                for k in 0..1024 {
+                    pre_rev[1024 - 1 - k] = pre[k];
+                }
+                buf.extend_from_slice(&pre_rev);
+                buf.extend_from_slice(raw);
+                let _ = post_extrap_for_test;
+                buf
+            })
+            .collect();
+        let gi = make_q5_global();
+        let marks = compute_marks(&pcm, &gi);
+        let first_marks: Vec<usize> = marks
+            .iter()
+            .enumerate()
+            .filter(|(_, &b)| b)
+            .map(|(i, _)| i)
+            .take(20)
+            .collect();
+        eprintln!("ramp first marks at indices: {:?}", first_marks);
+        let n_short = n_short_blocks_at_start(&marks);
+        assert_eq!(n_short, 2, "ramp: 2 short (got {n_short})");
+    }
+}
+
+/// Count how many short blocks libvorbis would emit at the start of the
+/// stream. For our constrained input space (silence / sine / ramp), this is
+/// either 1 (no transient detected past the leading-edge ampbuf-init noise)
+/// or 2 (transient detected before testW=2176).
+pub fn n_short_blocks_at_start(marks: &[bool]) -> usize {
+    // libvorbis _ve_envelope_search: cursor starts at bs1/2 = 1024 (mark
+    // index 16). testW for the first decision = centerW + bs[0]/4 + bs[1]/2
+    // + bs[0]/4 = 1024 + 64 + 1024 + 64 = 2176 → mark index 34. So only
+    // marks at index 16 ≤ i < 34 inform the first-block decision.
+    //
+    // The ampbuf-init noise only marks indices 0 and 1, which sit below the
+    // cursor floor and thus never contribute to a decision.
+    let cursor_idx = 1024 / ENV_SEARCHSTEP; // = 16
+    let test_idx = 2176 / ENV_SEARCHSTEP; // = 34
+    let scan_end = test_idx.min(marks.len());
+    for i in cursor_idx..scan_end {
+        if marks[i] {
+            return 2;
+        }
+    }
+    1
+}
+
+/// Reproduce libvorbis's W-flag decision for a sequence of blocks.
+///
+/// Returns a vec of bool: true = long block (W=1), false = short (W=0).
+/// Mirrors `_ve_envelope_search` semantics: at each centerW, look ahead
+/// `testW = centerW + bs[W]/4 + bs[1]/2 + bs[0]/4` and return long if the
+/// next mark falls beyond testW.
+///
+/// `n_samples` is the total PCM length (real audio + post-extrapolation).
+pub fn block_size_pattern(marks: &[bool], n_samples: usize) -> Vec<bool> {
+    let bs0 = SHORT_BLOCK as i64;
+    let bs1 = LONG_BLOCK as i64;
+    let step = ENV_SEARCHSTEP as i64;
+
+    let mut centerW: i64 = bs1 / 2; // initial centerW per libvorbis init
+    let mut cursor: i64 = bs1 / 2;
+    let mut prev_w = false; // start with short
+
+    let mut pattern = Vec::new();
+
+    loop {
+        // Determine W for the upcoming block from current centerW position.
+        let testW = centerW + (if prev_w { bs1 } else { bs0 }) / 4 + bs1 / 2 + bs0 / 4;
+
+        // Walk the cursor forward through marks; first mark in (centerW, current)
+        // before testW means "go short" (W=false).
+        let mut w = true; // default: long (no mark within range)
+        let mut j = cursor;
+        let limit = (n_samples as i64).min((marks.len() as i64) * step);
+        while j < limit - step {
+            if j >= testW {
+                // ran out of marks before testW reached — long block
+                break;
+            }
+            if (j / step) >= 0 {
+                let mark_idx = (j / step) as usize;
+                if mark_idx < marks.len() && marks[mark_idx] && j > centerW {
+                    w = false;
+                    break;
+                }
+            }
+            j += step;
+        }
+        cursor = j;
+
+        pattern.push(w);
+
+        // Advance centerW by half_current + half_next (we don't know next yet,
+        // but per libvorbis the centerW advance happens before the next decision
+        // and uses the just-decided W as "current"). For our pre-compute model,
+        // approximate with bs[w]/4 + bs[w]/4 = bs[w]/2 for sequential blocks of
+        // the same size. Where the size changes, libvorbis emits the transition
+        // long block which itself uses bs1/4 + bs0/4 advance from a short.
+        let advance = if w { bs1 / 2 } else { bs0 / 2 };
+        centerW += advance;
+        prev_w = w;
+
+        if centerW >= n_samples as i64 {
+            break;
+        }
+    }
+
+    pattern
+}

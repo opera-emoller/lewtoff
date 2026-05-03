@@ -8,7 +8,10 @@
 #![allow(clippy::excessive_precision)]
 #![allow(clippy::approx_constant)]
 
-use crate::tables::trig::{BITREV_2048, BITREV_256, SCALE_2048, SCALE_256, TRIG_2048, TRIG_256};
+use crate::tables::trig::{
+    BITREV_128, BITREV_2048, BITREV_256, SCALE_128, SCALE_2048, SCALE_256, TRIG_128, TRIG_2048,
+    TRIG_256,
+};
 
 // Constants from mdct.h (float mode)
 const CPI3_8: f32 = 0.38268343236508977175_f32;
@@ -413,4 +416,9 @@ pub(crate) fn mdct_forward_long(input: &[f32; N], output: &mut [f32; N2]) {
 
 pub(crate) fn mdct_forward_short(input: &[f32; 256], output: &mut [f32; 128]) {
     mdct_forward_generic(input, output, 256, 8, &TRIG_256, &BITREV_256, SCALE_256);
+}
+
+/// MDCT for envelope detection (n=128, used by `_ve_amp`).
+pub(crate) fn mdct_forward_envelope(input: &[f32; 128], output: &mut [f32; 64]) {
+    mdct_forward_generic(input, output, 128, 7, &TRIG_128, &BITREV_128, SCALE_128);
 }

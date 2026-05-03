@@ -642,6 +642,16 @@ fn preextrapolate_channel(pcm: &[f32]) -> [f32; CENTER_W] {
     result
 }
 
+#[cfg(test)]
+pub(crate) fn pre_extrap_for_test(pcm: &[f32]) -> [f32; CENTER_W] {
+    preextrapolate_channel(pcm)
+}
+
+#[cfg(test)]
+pub(crate) fn post_extrap_for_test(pcm: &[f32]) -> Vec<f32> {
+    postextrapolate_channel(pcm)
+}
+
 /// Port of libvorbis post-stream LPC extrapolation (block.c lines 487-527).
 ///
 /// At EOS, libvorbis predicts `blocksizes[1]*3` samples beyond the actual audio
@@ -760,17 +770,39 @@ pub(crate) fn encode_with_serial_and_meta(
         })
         .collect();
 
-    // Block layout: libvorbis always opens with one short (padding) block,
-    // then long blocks, then a flush long block at EOS.
-    //   Block 0:      SHORT block (PADDING)
-    //   Blocks 1..N:  LONG blocks + 1 flush block
-    //   FIRST_LONG_START = SHORT_BLOCK/4 + LONG_BLOCK/4 = 64 + 512 = 576
-    //   total = 1 + ceil((total_samples - 576) / 1024) + 1
+    // Block layout: libvorbis opens with 1 or 2 short (impulse) blocks (per
+    // envelope detection of leading transients), then a long transition
+    // block, then long mainline blocks, then a flush block at EOS.
     //
-    // This holds for silence, tonal, and ramp inputs — libvorbis uses the same
-    // padding path at stream start regardless of signal content.
-    let n_short_blocks: usize = 1;
-    let first_long_start: usize = SHORT_BLOCK / 4 + LONG_BLOCK / 4; // 576
+    //   first_long_start = (n_short_blocks - 1) * SHORT_HALF + 576
+    //   - 576 for n_short=1 (sine/silence)
+    //   - 704 for n_short=2 (ramp transient)
+    //
+    // n_short_blocks is determined by running envelope detection on the
+    // pre-extrapolated PCM buffer (LPC virtual pre-stream + audio); see
+    // envelope.rs for the port.
+    let n_short_blocks: usize = {
+        // Build the pre-extrapolated buffer for envelope detection: 1024
+        // virtual samples (LPC) + audio. Match libvorbis's `v->pcm[i]`
+        // layout where pcm[0..centerW] = LPC pre-extrap and
+        // pcm[centerW..] = real audio.
+        let lpc_train_end = 2112usize.min(total_samples);
+        let mut env_pcm: Vec<Vec<f32>> = Vec::with_capacity(ch);
+        for c in 0..ch {
+            let pre = preextrapolate_channel(&pcm_channels[c][..lpc_train_end]);
+            let mut buf = Vec::with_capacity(CENTER_W + total_samples);
+            // pre[k] = virtual sample at -(k+1); reverse for chronological order.
+            for k in 0..CENTER_W {
+                buf.push(pre[CENTER_W - 1 - k]);
+            }
+            buf.extend_from_slice(&pcm_channels[c]);
+            env_pcm.push(buf);
+        }
+        let marks = crate::envelope::compute_marks(&env_pcm, &gi);
+        crate::envelope::n_short_blocks_at_start(&marks)
+    };
+    let first_long_start: usize =
+        (n_short_blocks - 1) * SHORT_HALF + SHORT_BLOCK / 4 + LONG_BLOCK / 4;
     let remaining_after_transition = total_samples.saturating_sub(first_long_start);
     let long_data_blocks = remaining_after_transition.div_ceil(LONG_HALF);
     let total_blocks = n_short_blocks + long_data_blocks + 1; // +1 flush block

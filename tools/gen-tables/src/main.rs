@@ -334,6 +334,10 @@ fn main() {
     let (trig_256, bitrev_256, scale_256) = gen_trig(256);
     write_trig_table(&mut out, "256", &trig_256, &bitrev_256, scale_256);
 
+    // Envelope detection uses MDCT of size 128 (winlength=128).
+    let (trig_128, bitrev_128, scale_128) = gen_trig(128);
+    write_trig_table(&mut out, "128", &trig_128, &bitrev_128, scale_128);
+
     std::fs::write("src/tables/trig.rs", &out).expect("failed to write src/tables/trig.rs");
     eprintln!("Wrote src/tables/trig.rs");
 

@@ -41,6 +41,7 @@ pub mod ogg_pages;
 mod drft;
 #[doc(hidden)]
 pub mod encode;
+mod envelope;
 mod lpc;
 mod mapping0;
 mod setup;
