@@ -278,6 +278,33 @@ fn oracle_parity_ramp_stereo44() {
 }
 
 #[test]
+#[ignore = "manual dump for parity-diff analysis — ramp stereo"]
+fn parity_dump_ramp_files() {
+    let n = 44100usize;
+    let samples: Vec<i16> = (0..n * 2)
+        .map(|i| ((i % 65536) as i32 - 32768) as i16)
+        .collect();
+    let oracle_bytes = oracle_encode_q5(&samples, 44100, 2);
+    let serial = extract_serial(&oracle_bytes);
+    let (vendor, encoder_tag) = extract_comment_strings(&oracle_bytes);
+    let lewtoff_bytes = lewtoff::encode_with_serial_and_meta(
+        &samples,
+        SampleRate::Hz44100,
+        Channels::Stereo,
+        serial,
+        Some(&vendor),
+        Some(&encoder_tag),
+    );
+    std::fs::write("/tmp/oracle_ramp.ogg", &oracle_bytes).unwrap();
+    std::fs::write("/tmp/lw_ramp.ogg", &lewtoff_bytes).unwrap();
+    eprintln!(
+        "Wrote oracle_ramp.ogg ({} bytes) and lw_ramp.ogg ({} bytes)",
+        oracle_bytes.len(),
+        lewtoff_bytes.len()
+    );
+}
+
+#[test]
 #[ignore = "manual dump for parity-diff analysis"]
 fn parity_dump_files() {
     let samples = vec![0i16; 44100];
