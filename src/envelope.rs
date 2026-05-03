@@ -90,6 +90,11 @@ impl EnvelopeLookup {
             let s = (i as f64 / (ENV_WINLENGTH - 1) as f64 * std::f64::consts::PI).sin() as f32;
             mdct_win[i] = s * s;
         }
+        if std::env::var("LW_DEBUG_MDCT_WIN").is_ok() {
+            for i in 0..8 {
+                eprintln!("R_MDCT_WIN[{}] = 0x{:08x}", i, mdct_win[i].to_bits());
+            }
+        }
 
         let band_specs: [(usize, usize); VE_BANDS] =
             [(2, 4), (4, 5), (6, 6), (9, 8), (13, 8), (17, 8), (22, 8)];
@@ -155,16 +160,16 @@ impl EnvelopeLookup {
             static N: AtomicUsize = AtomicUsize::new(0);
             let n = N.fetch_add(1, Ordering::Relaxed);
             if (32..=38).contains(&n) {
-                let mut s = format!("R_AMP_DBG call={} windowed_pcm_first8:", n);
-                for z in 0..8 {
+                let mut s = format!("R_AMP_DBG call={} windowed_pcm_first16:", n);
+                for z in 0..16 {
                     s.push_str(&format!(" 0x{:08x}", vec_in[z].to_bits()));
                 }
                 eprintln!("{}", s);
             }
             mdct_forward_envelope(&vec_in, &mut vec_out);
             if (32..=38).contains(&n) {
-                let mut s = format!("R_AMP_DBG call={} mdct_out_first8:", n);
-                for z in 0..8 {
+                let mut s = format!("R_AMP_DBG call={} mdct_out_first16:", n);
+                for z in 0..16 {
                     s.push_str(&format!(" 0x{:08x}", vec_out[z].to_bits()));
                 }
                 eprintln!("{}", s);
@@ -180,14 +185,31 @@ impl EnvelopeLookup {
         let decay_init = {
             let band0 = self.filters.get_mut(band_offset).unwrap();
             // libvorbis: `temp = vec[0]*vec[0] + .7*vec[1]*vec[1] + .2*vec[2]*vec[2]`
-            // where vec[i] are float and .7/.2 are DOUBLE constants. C
-            // promotes the multiplications to f64 and truncates only at the
-            // final assignment to `temp` (float). Rust f32 literals would
-            // keep the math in f32 throughout. Match C explicitly.
-            let v0 = vec_out[0] as f64;
-            let v1 = vec_out[1] as f64;
-            let v2 = vec_out[2] as f64;
-            let temp = (v0 * v0 + 0.7 * v1 * v1 + 0.2 * v2 * v2) as f32;
+            // The first term `vec[0]*vec[0]` is float*float (f32) since both
+            // operands are float — `.7` only promotes its own multiplication
+            // chain. The middle terms `.7*vec[1]*vec[1]` and `.2*vec[2]*vec[2]`
+            // are evaluated in f64 (because `.7`/`.2` are double). The final
+            // `f32 + f64 + f64` happens in f64; assignment to `float temp`
+            // truncates back to f32.
+            let term0 = vec_out[0] * vec_out[0]; // f32 * f32 = f32
+            let term1 = 0.7_f64 * vec_out[1] as f64 * vec_out[1] as f64;
+            let term2 = 0.2_f64 * vec_out[2] as f64 * vec_out[2] as f64;
+            let temp = (term0 as f64 + term1 + term2) as f32;
+            if std::env::var("LW_DEBUG_NEARDC").is_ok() {
+                use std::sync::atomic::{AtomicUsize, Ordering};
+                static N: AtomicUsize = AtomicUsize::new(0);
+                let n = N.fetch_add(1, Ordering::Relaxed);
+                if n < 50 {
+                    eprintln!(
+                        "R_NEARDC call={} v0=0x{:08x} v1=0x{:08x} v2=0x{:08x} temp=0x{:08x}",
+                        n,
+                        vec_out[0].to_bits(),
+                        vec_out[1].to_bits(),
+                        vec_out[2].to_bits(),
+                        temp.to_bits()
+                    );
+                }
+            }
             let ptr = band0.nearptr;
             let decay;
             if ptr == 0 {
@@ -208,10 +230,29 @@ impl EnvelopeLookup {
             // libvorbis: `decay *= (1./(VE_NEARDC+1));` — `1./16` is double,
             // so decay promotes to f64, multiplies, truncates back to f32.
             let decay_scaled = ((decay as f64) * (1.0_f64 / (VE_NEARDC + 1) as f64)) as f32;
-            // libvorbis: `decay = todB(&decay)*.5-15.f` — todB returns f64
-            // (its 7.17711438e-7 literal is a double), `.5` is double,
-            // `15.f` is float. Whole expression in f64, truncate at assign.
-            (todb(decay_scaled) * 0.5_f64 - 15.0_f32 as f64) as f32
+            // libvorbis: `decay = todB(&decay)*.5-15.f` where todB returns
+            // FLOAT (the inline IEEE_FLOAT32 path). `.5` is double, so the
+            // float result promotes to double for the multiply, then `15.f`
+            // promotes to double for the subtract; assignment to float
+            // truncates. Mirror that promotion chain explicitly.
+            let decay_db = (todb(decay_scaled) as f64 * 0.5_f64 - 15.0_f32 as f64) as f32;
+            if std::env::var("LW_DEBUG_DECAY").is_ok() {
+                use std::sync::atomic::{AtomicUsize, Ordering};
+                static N: AtomicUsize = AtomicUsize::new(0);
+                let n = N.fetch_add(1, Ordering::Relaxed);
+                if n < 40 {
+                    eprintln!(
+                        "R_DECAY call={} decay_in=0x{:08x} decay_scaled=0x{:08x} decay_db=0x{:08x} acc=0x{:08x} pacc=0x{:08x}",
+                        n,
+                        decay.to_bits(),
+                        decay_scaled.to_bits(),
+                        decay_db.to_bits(),
+                        band0.near_dc_acc.to_bits(),
+                        band0.near_dc_partialacc.to_bits(),
+                    );
+                }
+            }
+            decay_db
         };
 
         // Spread + limit. Output stored in vec_out[i>>1] (half-size).
@@ -222,10 +263,9 @@ impl EnvelopeLookup {
         let mut i = 0usize;
         while i < n2 {
             let val = vec_out[i] * vec_out[i] + vec_out[i + 1] * vec_out[i + 1];
-            // libvorbis: `val = todB(&val)*.5f` — `.5f` is float. todB
-            // returns f64; multiplied by float .5f → still f64; truncate to
-            // f32 at assign to `val`.
-            let mut val_db = (todb(val) * 0.5_f32 as f64) as f32;
+            // libvorbis: `val = todB(&val)*.5f` — todB returns FLOAT, `.5f`
+            // is FLOAT, so this is a pure f32 multiplication.
+            let mut val_db = todb(val) * 0.5_f32;
             if val_db < decay {
                 val_db = decay;
             }
@@ -241,6 +281,22 @@ impl EnvelopeLookup {
             i += 2;
         }
 
+        if std::env::var("LW_DEBUG_SPREAD").is_ok() {
+            use std::sync::atomic::{AtomicUsize, Ordering};
+            static N: AtomicUsize = AtomicUsize::new(0);
+            let n = N.fetch_add(1, Ordering::Relaxed);
+            if (32..=36).contains(&n) {
+                let mut s = format!(
+                    "R_SPREAD call={} decay_init=0x{:08x} spread:",
+                    n,
+                    decay_init.to_bits()
+                );
+                for k in 0..16 {
+                    s.push_str(&format!(" 0x{:08x}", spread[k].to_bits()));
+                }
+                eprintln!("{}", s);
+            }
+        }
         // Per-band trigger detection.
         for j in 0..VE_BANDS {
             let band = &self.bands[j];
@@ -312,15 +368,26 @@ impl EnvelopeLookup {
     }
 }
 
-/// libvorbis `todB` macro: `((*(int*)x - 0x3F800000) * 7.17711438e-7)`.
-/// The 7.17711438e-7 literal is a DOUBLE in C, so todB always evaluates in
-/// f64 and the caller's expression promotes everything else to f64 too.
-/// Returning f64 here lets callers do `todb(x) * .5 - 15.f` etc. with the
-/// same f32/f64 promotion rules as C.
+/// libvorbis `todB` (with VORBIS_IEEE_FLOAT32 defined, the actual path used):
+///
+/// ```c
+/// static inline float todB(const float *x){
+///   union { ogg_uint32_t i; float f; } ix;
+///   ix.f = *x;
+///   ix.i = ix.i & 0x7fffffff;          // absolute value
+///   return (float)(ix.i * 7.17711438e-7f - 764.6161886f);
+/// }
+/// ```
+///
+/// Takes the absolute value, then uses **f32** constants (`7.17711438e-7f`,
+/// `764.6161886f`) so the entire expression evaluates in f32. The cast to
+/// float at the end is a no-op since everything is already f32. Earlier I
+/// ported the macro form (returns f64), which is dead code in this build —
+/// the inline function above is what's actually compiled.
 #[inline]
-fn todb(x: f32) -> f64 {
-    let bits = x.to_bits() as i32;
-    (bits - 0x3F80_0000) as f64 * 7.17711438e-7_f64
+fn todb(x: f32) -> f32 {
+    let bits = x.to_bits() & 0x7fff_ffff;
+    (bits as f32) * 7.17711438e-7_f32 - 764.6161886_f32
 }
 
 /// Compute the envelope-mark vector for an entire stream.
