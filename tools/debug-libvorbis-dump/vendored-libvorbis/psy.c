@@ -470,6 +470,21 @@ void _vp_psy_init(vorbis_look_psy *p,vorbis_info_psy *vi,
       if(fno){ fwrite(p->noiseoffset[1], sizeof(float), n, fno); fclose(fno); }
     }
   }
+  /* dump halfoc array */
+  {
+    static int hdumped=0;
+    if(!hdumped){
+      hdumped=1;
+      FILE *fh=fopen("/tmp/lewtoff-debug/c_halfoc.bin","wb");
+      if(fh){
+        for(int hi=0; hi<n; hi++){
+          float halfoc_v = toOC((hi+.5)*rate/(2.*n))*2.;
+          fwrite(&halfoc_v, sizeof(float), 1, fh);
+        }
+        fclose(fh);
+      }
+    }
+  }
 #if 0
   {
     static int ls=0;

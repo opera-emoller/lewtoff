@@ -577,10 +577,12 @@ pub fn vp_psy_init(
     }
 
     // noise offsets
+    let mut halfoc_dump = Vec::with_capacity(n);
     for i in 0..n {
         // C: float halfoc=toOC((i+.5)*rate/(2.*n))*2.;
         // The argument to toOC is f64 (literals .5, 2. are double); cast at fn boundary.
         let mut halfoc = to_oc(((i as f64 + 0.5) * rate as f64 / (2.0 * n as f64)) as f32) * 2.0;
+        halfoc_dump.push(halfoc);
         if halfoc < 0.0 {
             halfoc = 0.0;
         }
@@ -593,12 +595,32 @@ pub fn vp_psy_init(
         }
         let del = halfoc - inthalfoc as f32;
 
-        // C: noiseoff[j][i] = a*(1.-del) + b*del; all in double, cast to float.
+        // C: a*(1.-del) + b*del — first term in f64 (1. is double), second
+        // term in f32 (b and del are float); they sum in f64 and cast to f32.
         for j in 0..P_NOISECURVES {
-            let a = vi.noiseoff[j][inthalfoc] as f64;
-            let b = vi.noiseoff[j][inthalfoc + 1] as f64;
-            let d = del as f64;
-            p.noiseoffset[j][i] = (a * (1.0 - d) + b * d) as f32;
+            let a = vi.noiseoff[j][inthalfoc];
+            let b = vi.noiseoff[j][inthalfoc + 1];
+            let term1 = (a as f64) * (1.0 - (del as f64)); // f64
+            let term2 = (b * del) as f64; // f32 mul, promote
+            p.noiseoffset[j][i] = (term1 + term2) as f32;
+        }
+    }
+
+    if std::env::var("LEWTOFF_DEBUG_DUMP").is_ok() && n == 128 {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        static FIRED: AtomicBool = AtomicBool::new(false);
+        if !FIRED.swap(true, Ordering::Relaxed) {
+            let mut bytes = Vec::with_capacity(halfoc_dump.len() * 4);
+            for v in halfoc_dump.iter() {
+                bytes.extend_from_slice(&v.to_le_bytes());
+            }
+            let _ = std::fs::write("/tmp/lewtoff-debug/r_halfoc.bin", &bytes);
+            // dump noiseoffset[1] from short block specifically
+            let mut nbytes = Vec::with_capacity(n * 4);
+            for v in p.noiseoffset[1].iter() {
+                nbytes.extend_from_slice(&v.to_le_bytes());
+            }
+            let _ = std::fs::write("/tmp/lewtoff-debug/r_noiseoffset_1.bin", &nbytes);
         }
     }
 
