@@ -307,6 +307,22 @@ static int mapping0_forward(vorbis_block *vb){
       for(dbgj=0;dbgj<n;dbgj++) fprintf(stderr,"%.8f%s",pcm[dbgj],dbgj<n-1?",":"");
       fprintf(stderr,"]\n");
     }
+    if((vb->sequence==35 || vb->sequence==36 || vb->sequence>=46) && i==0){
+      union { float f; unsigned u; } v;
+      fprintf(stderr,"LV_WINDOWED_LAST seq=%lld n=%d:",(long long)vb->sequence,n);
+      for(int dbgj=0;dbgj<n;dbgj+=64){
+        v.f = pcm[dbgj];
+        fprintf(stderr," [%d]=%.6e(0x%08x)",dbgj,v.f,v.u);
+      }
+      fprintf(stderr,"\n");
+    }
+    if(vb->sequence==35 && i==0){
+      union { float f; unsigned u; } v;
+      for(int dbgj=0;dbgj<n;dbgj++){
+        v.f = pcm[dbgj];
+        fprintf(stderr,"LV_WINDOWED_DETAIL[%d]=0x%08x\n",dbgj,v.u);
+      }
+    }
 
 #if 0
     if(vi->channels==2){
@@ -469,8 +485,21 @@ static int mapping0_forward(vorbis_block *vb){
                     logmdct,
                     noise); /* noise does not have by-frequency offset
                                bias applied yet */
+      if(vb->sequence==14 && i==0 && n==2048){
+        union { float f; unsigned u; } v;
+        v.f = noise[220];
+        fprintf(stderr,"C_NOISE220 seq=14: bin220=%.10f(0x%08x) bin219=%.10f bin221=%.10f\n",
+          noise[220], v.u, noise[219], noise[221]);
+        v.f = logmdct[220];
+        fprintf(stderr,"C_LOGMDCT220 seq=14: bin220=%.10f(0x%08x) bin219=%.10f bin221=%.10f\n",
+          logmdct[220], v.u, logmdct[219], logmdct[221]);
+        FILE *fp = fopen("/tmp/c_logmdct_blk11.bin","wb");
+        if(fp){ fwrite(logmdct, sizeof(float), n/2, fp); fclose(fp); }
+        fp = fopen("/tmp/c_noise_blk11.bin","wb");
+        if(fp){ fwrite(noise, sizeof(float), n/2, fp); fclose(fp); }
+      }
       /* DEBUG: dump psy data for first block */
-      if(vb->sequence<=5 && i==0){
+      if((vb->sequence<=5 || vb->sequence==35) && i==0){
         int dbgj;
         fprintf(stderr,"LV_ATH_seq%lld_bin0: ath0=%.6f att=%.6f tone_init=%.6f ampmax=%.6f\n",
           (long long)vb->sequence, psy_look->ath[0], local_ampmax[i]+psy_look->vi->ath_adjatt,
@@ -485,6 +514,12 @@ static int mapping0_forward(vorbis_block *vb){
                 vb->pcmend, global_ampmax, local_ampmax[i], blocktype);
         fprintf(stderr,"LV_BLOCK0_LOGMDCT: [");
         for(dbgj=0;dbgj<n/2;dbgj++) fprintf(stderr,"%.6f%s",logmdct[dbgj],dbgj<n/2-1?",":"");
+        fprintf(stderr,"]\n");
+        fprintf(stderr,"LV_BLOCK0_LOGMDCT_BITS: [");
+        for(dbgj=0;dbgj<n/2;dbgj++){
+          union { float f; unsigned u; } v; v.f=logmdct[dbgj];
+          fprintf(stderr,"0x%08x%s",v.u,dbgj<n/2-1?",":"");
+        }
         fprintf(stderr,"]\n");
         fprintf(stderr,"LV_BLOCK0_LOGFFT: [");
         for(dbgj=0;dbgj<n/2;dbgj++) fprintf(stderr,"%.6f%s",logfft[dbgj],dbgj<n/2-1?",":"");
@@ -562,6 +597,12 @@ static int mapping0_forward(vorbis_block *vb){
         fprintf(stderr,"LV_BLOCK0_LOGMASK: [");
         for(dbgj=0;dbgj<n/2;dbgj++) fprintf(stderr,"%.6f%s",logmask[dbgj],dbgj<n/2-1?",":"");
         fprintf(stderr,"]\n");
+        fprintf(stderr,"LV_BLOCK0_LOGMASK_BITS: [");
+        for(dbgj=0;dbgj<n/2;dbgj++){
+          union { float f; unsigned u; } v; v.f=logmask[dbgj];
+          fprintf(stderr,"0x%08x%s",v.u,dbgj<n/2-1?",":"");
+        }
+        fprintf(stderr,"]\n");
       }
       if(dump_now && i==0 && !dump_done){
         int _dn;
@@ -615,7 +656,7 @@ static int mapping0_forward(vorbis_block *vb){
         }
       }
 
-      if(vb->sequence>=3 && vb->sequence<=16 && i==0){
+      if(vb->sequence>=3 && i==0){
         int *fp = floor_posts[i][PACKETBLOBS/2];
         fprintf(stderr,"LV_FLOOR seq=%lld n=%d: ", (long long)vb->sequence, (int)vb->pcmend);
         if(fp){

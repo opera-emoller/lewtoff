@@ -170,6 +170,7 @@ static int _ve_amp(envelope_lookup *ve,
     acc*=bands[j].total;
 
     /* convert amplitude to delta */
+    float dbg_postmax=0, dbg_premax=0;
     {
       int p,this=filters[j].ampptr;
       float postmax,postmin,premax=-99999.f,premin=99999.f;
@@ -189,6 +190,7 @@ static int _ve_amp(envelope_lookup *ve,
 
       valmin=postmin-premin;
       valmax=postmax-premax;
+      dbg_postmax=postmax; dbg_premax=premax;
 
       /*filters[j].markers[pos]=valmax;*/
       filters[j].ampbuf[this]=acc;
@@ -202,6 +204,20 @@ static int _ve_amp(envelope_lookup *ve,
       ret|=4;
     }
     if(valmin<gi->postecho_thresh[j]-penalty)ret|=2;
+
+    {
+      static int n_band=0;
+      if(n_band<200){
+        union { float f; unsigned u; } v;
+        fprintf(stderr,"C_AMP band=%ld acc=0x%08x postmax=0x%08x premax=0x%08x valmax=%.6f thresh=%.6f stretch=%d\n",
+          j,
+          (v.f=acc, v.u),
+          (v.f=dbg_postmax, v.u),
+          (v.f=dbg_premax, v.u),
+          valmax, gi->preecho_thresh[j], stretch);
+        n_band++;
+      }
+    }
   }
 
   return(ret);
@@ -253,6 +269,9 @@ long _ve_envelope_search(vorbis_dsp_state *v){
     }
 
     if(ret&4)ve->stretch=-1;
+    if(ret){
+      fprintf(stderr,"C_ENV_MARK j=%ld ret=%d stretch=%d\n",j,ret,ve->stretch);
+    }
   }
 
   ve->current=last*ve->searchstep;
@@ -339,6 +358,15 @@ int _ve_envelope_mark(vorbis_dsp_state *v){
   }else{
     beginW-=ci->blocksizes[0]/4;
     endW+=ci->blocksizes[0]/4;
+  }
+
+  {
+    static int n_em=0;
+    if(n_em<8){
+      fprintf(stderr,"C_VE_MARK centerW=%ld beginW=%ld endW=%ld curmark=%ld W=%d\n",
+              centerW,beginW,endW,ve->curmark,v->W);
+      n_em++;
+    }
   }
 
   if(ve->curmark>=beginW && ve->curmark<endW)return(1);

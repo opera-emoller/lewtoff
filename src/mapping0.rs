@@ -331,10 +331,16 @@ pub(crate) fn mapping0_forward(
         // floor1_fit
         let floor_state = &floor_states[mapping.floorsubmap[submap]];
         if std::env::var("LW_DEBUG_LOGMDCT").is_ok() {
-            let vals: Vec<String> = logmdct.iter().map(|v| format!("{:.6}", v)).collect();
-            eprintln!("LW_BLOCK0_LOGMDCT: [{}]", vals.join(","));
-            let mvals: Vec<String> = logmask.iter().map(|v| format!("{:.6}", v)).collect();
-            eprintln!("LW_BLOCK0_LOGMASK: [{}]", mvals.join(","));
+            let vals: Vec<String> = logmdct
+                .iter()
+                .map(|v| format!("0x{:08x}", v.to_bits()))
+                .collect();
+            eprintln!("LW_BLOCK0_LOGMDCT_BITS: [{}]", vals.join(","));
+            let mvals: Vec<String> = logmask
+                .iter()
+                .map(|v| format!("0x{:08x}", v.to_bits()))
+                .collect();
+            eprintln!("LW_BLOCK0_LOGMASK_BITS: [{}]", mvals.join(","));
         }
         if std::env::var("LW_DEBUG_PSY").is_ok() {
             eprintln!(

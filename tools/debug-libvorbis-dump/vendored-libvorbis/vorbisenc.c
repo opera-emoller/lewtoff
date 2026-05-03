@@ -422,6 +422,17 @@ static void vorbis_encode_noisebias_setup(vorbis_info *vi,double s,int block,
     }
   }
 
+  /* Dump post-clamp noiseoff bits for parity port */
+  for(j=0;j<P_NOISECURVES;j++){
+    fprintf(stderr,"NOISEOFF_FINAL block=%d curve=%d:",block,j);
+    for(i=0;i<P_BANDS;i++){
+      union { float f; unsigned int u; } v;
+      v.f = p->noiseoff[j][i];
+      fprintf(stderr," %.7f(0x%08x)", v.f, v.u);
+    }
+    fprintf(stderr,"\n");
+  }
+
   return;
 }
 

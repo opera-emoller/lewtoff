@@ -858,6 +858,19 @@ int floor1_encode(oggpack_buffer *opb,vorbis_block *vb,
       }
     }
 
+    {
+      static int dumped=0;
+      if(dumped<10){
+        dumped++;
+        fprintf(stderr,"C_FLOOR_OUT posts=%ld:",posts);
+        for(int z=0;z<posts;z++) fprintf(stderr," %d",out[z]);
+        fprintf(stderr,"\n");
+        fprintf(stderr,"C_FLOOR_POSTQ posts=%ld:",posts);
+        for(int z=0;z<posts;z++) fprintf(stderr," %d",post[z]);
+        fprintf(stderr,"\n");
+      }
+    }
+
     /* we have everything we need. pack it out */
     /* mark nontrivial floor */
     DUMP_WRITE(opb,1,1);
@@ -879,6 +892,15 @@ int floor1_encode(oggpack_buffer *opb,vorbis_block *vb,
       int cval=0;
       int cshift=0;
       int k,l;
+
+      {
+        static int n_part_dump=0;
+        if(n_part_dump<200){
+          fprintf(stderr,"C_FLOOR_PART i=%ld class=%d cdim=%d csubbits=%d\n",
+                  i, class, cdim, csubbits);
+          n_part_dump++;
+        }
+      }
 
       /* generate the partition's first stage cascade value */
       if(csubbits){
@@ -905,6 +927,14 @@ int floor1_encode(oggpack_buffer *opb,vorbis_block *vb,
           cshift+=csubbits;
         }
         /* write it */
+        {
+          static int n_cval=0;
+          if(n_cval<200){
+            fprintf(stderr,"C_FLOOR_CVAL i=%ld class=%d cval=%d class_book=%d\n",
+                    i, class, cval, info->class_book[class]);
+            n_cval++;
+          }
+        }
         look->phrasebits+=
           vorbis_book_encode(books+info->class_book[class],cval,opb);
 
@@ -925,10 +955,30 @@ int floor1_encode(oggpack_buffer *opb,vorbis_block *vb,
       for(k=0;k<cdim;k++){
         int book=info->class_subbook[class][bookas[k]];
         if(book>=0){
+          {
+            static int n_pv=0;
+            if(n_pv<400){
+              fprintf(stderr,"C_FLOOR_POSTV i=%ld k=%d cdim=%d j+k=%ld out=%d book=%d entries=%ld\n",
+                      i, k, cdim, j+k, out[j+k], book, (books+book)->entries);
+              n_pv++;
+            }
+          }
           /* hack to allow training with 'bad' books */
-          if(out[j+k]<(books+book)->entries)
+          if(out[j+k]<(books+book)->entries) {
+            {
+              static int n_cw=0;
+              if(n_cw<8){
+                int entry=out[j+k];
+                ogg_uint32_t cw = (books+book)->codelist[entry];
+                int cl = (books+book)->c->lengthlist[entry];
+                fprintf(stderr,"C_POSTV_CW i=%ld k=%d book=%d entry=%d codeword=0x%08x len=%d\n",
+                        i, k, book, entry, cw, cl);
+                n_cw++;
+              }
+            }
             look->postbits+=vorbis_book_encode(books+book,
                                                out[j+k],opb);
+          }
           /*else
             fprintf(stderr,"+!");*/
 

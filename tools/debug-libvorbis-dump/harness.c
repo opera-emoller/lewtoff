@@ -71,7 +71,9 @@ int main(void) {
     int packet_count = 0;
     int first_short_done = 0;
 
-    while (fed < FRAMES || !first_short_done) {
+    int eos_signaled = 0;
+    int eos_blocks_drained = 0;
+    while (1) {
         if (fed < FRAMES) {
             int this_chunk = CHUNK;
             if (fed + this_chunk > FRAMES) this_chunk = FRAMES - fed;
@@ -88,11 +90,15 @@ int main(void) {
                 float v = sinf(2.0f * (float)M_PI * 440.0f * t);
                 int16_t s = (int16_t)(v * 16384.0f);
                 pcm[0][i] = s / 32768.0f;
+                if((fed+i)<10) fprintf(stderr,"HARNESS_S idx=%d s=%d\n",fed+i,s);
             }
             vorbis_analysis_wrote(&vd, this_chunk);
             fed += this_chunk;
         } else {
-            vorbis_analysis_wrote(&vd, 0);
+            if(!eos_signaled){
+                vorbis_analysis_wrote(&vd, 0);
+                eos_signaled = 1;
+            }
         }
 
         while (vorbis_analysis_blockout(&vd, &vb) == 1) {
@@ -153,10 +159,20 @@ int main(void) {
             ogg_packet op;
             while (vorbis_bitrate_flushpacket(&vd, &op)) {
                 packet_count++;
+                if(packet_count<=5){
+                    fprintf(stderr,"HARNESS_PACKET seq=%lld bytes=%ld first=[",
+                            (long long)op.packetno, op.bytes);
+                    for(int z=0;z<op.bytes && z<24;z++)
+                      fprintf(stderr,"%02x ",op.packet[z]);
+                    fprintf(stderr,"]\n");
+                }
             }
         }
 
-        if (first_short_done && fed >= FRAMES) break;
+        if (eos_signaled) {
+            eos_blocks_drained++;
+            if (eos_blocks_drained > 5) break;
+        }
     }
 
     vorbis_block_clear(&vb);

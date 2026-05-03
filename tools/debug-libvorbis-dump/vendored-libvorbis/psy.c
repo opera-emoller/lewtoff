@@ -798,6 +798,22 @@ static void bark_noise_hybridmp(int n,const long *b,
       fprintf(stderr,"LV_BNH i=%d lo=%ld hi=%ld x=%.1f tN=%.6f ty=%.6f R=%.6f noise=%.6f offset=%.6f fixed=%d\n",
         i, lo, hi, x, tN, tY, R, R-offset, offset, fixed);
     }
+    if(i==118 || i==127){
+      union { float f; unsigned u; } v;
+      fprintf(stderr,"LV_BNH i=%d lo=%ld hi=%ld x=%.1f tN=%g(0x%08x) tY=%g(0x%08x) tXX=%g(0x%08x) tX=%g(0x%08x) tXY=%g(0x%08x) A=%g(0x%08x) B=%g(0x%08x) D=%g(0x%08x) R=%g(0x%08x) offset=%g\n",
+        i, lo, hi, x,
+        (v.f=tN, tN), v.u,
+        (v.f=tY, tY), v.u,
+        (v.f=tXX, tXX), v.u,
+        (v.f=tX, tX), v.u,
+        (v.f=tXY, tXY), v.u,
+        (v.f=A, A), v.u,
+        (v.f=B, B), v.u,
+        (v.f=D, D), v.u,
+        (v.f=R, R), v.u,
+        offset
+      );
+    }
 
     if (R < 0.f) R = 0.f;
 

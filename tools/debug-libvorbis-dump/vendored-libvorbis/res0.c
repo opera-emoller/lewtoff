@@ -408,6 +408,10 @@ static int _encodepart(oggpack_buffer *opb,int *vec, int n,
   int step=n/dim;
 
   for(i=0;i<step;i++){
+    int vec_in_copy[64];
+    int copy_dim = dim<64?dim:64;
+    for(int z=0;z<copy_dim;z++) vec_in_copy[z]=vec[i*dim+z];
+
     int entry=local_book_besterror(book,vec+i*dim);
 
 #ifdef TRAIN_RES
@@ -415,6 +419,17 @@ static int _encodepart(oggpack_buffer *opb,int *vec, int n,
       acc[entry]++;
 #endif
 
+    {
+      static int n_be=0;
+      if(n_be<400){
+        fprintf(stderr,"C_BESTERR n=%d dim=%d step_i=%d entry=%d vec_in=[",n_be,dim,i,entry);
+        for(int z=0;z<copy_dim;z++) fprintf(stderr,"%d ",vec_in_copy[z]);
+        fprintf(stderr,"] vec_residual=[");
+        for(int z=0;z<copy_dim;z++) fprintf(stderr,"%d ",vec[i*dim+z]);
+        fprintf(stderr,"]\n");
+        n_be++;
+      }
+    }
     bits+=vorbis_book_encode(book,entry,opb);
 
   }
@@ -559,6 +574,14 @@ static long **_2class(vorbis_block *vb,vorbis_look_residue *vl,int **in,
          angmax<=info->classmetric2[j])
         break;
 
+    {
+      static int n_2c=0;
+      if(n_2c<32){
+        fprintf(stderr,"C_2CLASS i=%ld magmax=%d angmax=%d class=%ld\n",
+                i, magmax, angmax, j);
+        n_2c++;
+      }
+    }
     partword[0][i]=j;
 
   }
