@@ -811,6 +811,15 @@ static int mapping0_forward(vorbis_block *vb){
           if(info->chmuxlist[j]==i)
             couple_bundle[ch_in_bundle++]=iwork[j];
 
+        /* Dump residue input from first invocation */
+        {
+          static int fired=0;
+          if(!fired && dump_now){
+            fired=1;
+            FILE *f=fopen("/tmp/lewtoff-debug/c_residue_input.bin","wb");
+            if(f){ fwrite(couple_bundle[0], sizeof(int), n/2, f); fclose(f); }
+          }
+        }
         _residue_P[ci->residue_type[resnum]]->
           forward(opb,vb,b->residue[resnum],
                   couple_bundle,zerobundle,ch_in_bundle,classifications,i);

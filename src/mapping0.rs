@@ -431,6 +431,18 @@ pub(crate) fn mapping0_forward(
                         .iter()
                         .map(|&ci| iwork[ci].clone())
                         .collect();
+                    if std::env::var("LEWTOFF_DEBUG_DUMP").is_ok() {
+                        use std::sync::atomic::{AtomicBool, Ordering};
+                        static FIRED: AtomicBool = AtomicBool::new(false);
+                        if !FIRED.swap(true, Ordering::Relaxed) {
+                            let mut bytes = Vec::new();
+                            for v in local[0].iter() {
+                                bytes.extend_from_slice(&v.to_le_bytes());
+                            }
+                            let _ =
+                                std::fs::write("/tmp/lewtoff-debug/r_residue_input.bin", &bytes);
+                        }
+                    }
                     {
                         let mut in_mut: Vec<&mut [i32]> =
                             local.iter_mut().map(|v| v.as_mut_slice()).collect();
