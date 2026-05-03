@@ -95,7 +95,7 @@ debug-dump-c:
     #!/usr/bin/env bash
     set -e
     TOOL=tools/debug-libvorbis-dump
-    /usr/bin/clang -O2 -g -std=c11 -ffp-contract=on \
+    /usr/bin/clang -O0 -g -std=c11 -ffp-contract=off \
       -I$TOOL/vendored-libvorbis \
       -I$TOOL/vendored-libvorbis/include \
       -I/opt/homebrew/include \

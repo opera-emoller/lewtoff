@@ -85,11 +85,14 @@ pub fn write_comment_header_with_strings(
         w.write(b as u32, 8);
     }
 
-    w.write(1, 32);
-
-    w.write(encoder_tag.len() as u32, 32);
-    for &b in encoder_tag {
-        w.write(b as u32, 8);
+    if encoder_tag.is_empty() {
+        w.write(0, 32);
+    } else {
+        w.write(1, 32);
+        w.write(encoder_tag.len() as u32, 32);
+        for &b in encoder_tag {
+            w.write(b as u32, 8);
+        }
     }
 
     w.write(1, 1);

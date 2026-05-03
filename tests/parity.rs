@@ -13,6 +13,63 @@ use lewtoff::{Channels, SampleRate};
 use std::io::Write;
 use std::process::{Command, Stdio};
 
+/// Encode using our own statically-linked libvorbis (tools/oracle-encoder).
+/// Pinned compile flags (-O0 -ffp-contract=off) make this deterministic;
+/// CI / dev hosts produce identical bytes given identical input.
+fn oracle_encode_q5(samples: &[i16], rate: u32, channels: u16) -> Vec<u8> {
+    let raw: Vec<u8> = samples.iter().flat_map(|&s| s.to_le_bytes()).collect();
+    let bin = std::env::current_dir()
+        .unwrap()
+        .join("tools/oracle-encoder/oracle-encoder");
+    let mut child = Command::new(&bin)
+        .arg(rate.to_string())
+        .arg(channels.to_string())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap_or_else(|e| panic!("spawn oracle-encoder at {}: {e}", bin.display()));
+    child.stdin.take().unwrap().write_all(&raw).unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert!(out.status.success(), "oracle-encoder exited non-zero");
+    out.stdout
+}
+
+fn assert_parity_oracle(samples: &[i16], rate: SampleRate, channels: Channels) {
+    let rate_hz: u32 = match rate {
+        SampleRate::Hz44100 => 44100,
+        SampleRate::Hz48000 => 48000,
+    };
+    let ch: u16 = match channels {
+        Channels::Mono => 1,
+        Channels::Stereo => 2,
+    };
+    let oracle_bytes = oracle_encode_q5(samples, rate_hz, ch);
+    let serial = extract_serial(&oracle_bytes);
+    let (vendor, encoder_tag) = extract_comment_strings(&oracle_bytes);
+    let lewtoff_bytes = lewtoff::encode_with_serial_and_meta(
+        samples,
+        rate,
+        channels,
+        serial,
+        Some(&vendor),
+        Some(&encoder_tag),
+    );
+    if lewtoff_bytes != oracle_bytes {
+        let div = first_diff(&lewtoff_bytes, &oracle_bytes);
+        let lw_end = (div + 16).min(lewtoff_bytes.len());
+        let or_end = (div + 16).min(oracle_bytes.len());
+        let start = div.saturating_sub(8);
+        panic!(
+            "ORACLE parity diverged at byte {div}\n  lewtoff len: {}\n  oracle  len: {}\n  lewtoff ctx: {:02x?}\n  oracle  ctx: {:02x?}",
+            lewtoff_bytes.len(),
+            oracle_bytes.len(),
+            &lewtoff_bytes[start..lw_end],
+            &oracle_bytes[start.min(oracle_bytes.len())..or_end],
+        );
+    }
+}
+
 fn ffmpeg_encode_q5(samples: &[i16], rate: u32, channels: u16) -> Vec<u8> {
     let raw: Vec<u8> = samples.iter().flat_map(|&s| s.to_le_bytes()).collect();
 
@@ -179,6 +236,25 @@ fn parity_silence_stereo48() {
 fn parity_sine_440_mono44() {
     let samples = make_sine_mono(44100, 440.0, 1.0);
     assert_parity(&samples, SampleRate::Hz44100, Channels::Mono);
+}
+
+// --- Oracle-based parity (own libvorbis build, deterministic flags) ---
+
+#[test]
+fn oracle_parity_silence_mono44() {
+    assert_parity_oracle(&vec![0i16; 44100], SampleRate::Hz44100, Channels::Mono);
+}
+
+#[test]
+fn oracle_parity_silence_stereo44() {
+    let stereo: Vec<i16> = vec![0i16; 44100 * 2];
+    assert_parity_oracle(&stereo, SampleRate::Hz44100, Channels::Stereo);
+}
+
+#[test]
+fn oracle_parity_sine_440_mono44() {
+    let samples = make_sine_mono(44100, 440.0, 1.0);
+    assert_parity_oracle(&samples, SampleRate::Hz44100, Channels::Mono);
 }
 
 #[test]
