@@ -1,60 +1,168 @@
 //! Vorbis window application and overlap-add buffer.
-//!
-//! Literal port of libvorbis `lib/window.c` `_vorbis_apply_window` for the
-//! long-block-only (n=2048) case used by Q5.
-//!
-//! For Q5, all blocks are long (n=2048). The window is applied as:
-//!   - samples[i]    *= SIN_WINDOW_2048[i]      for i in 0..1024  (left half, forward)
-//!   - samples[i]    *= SIN_WINDOW_2048[2047-i]  for i in 1024..2048 (right half, reversed)
-//!
-//! Overlap-add: each new 1024-sample advance creates a 2048-sample PCM block
-//! by concatenating the previous 1024 samples with the new 1024 samples.
 
-use crate::tables::window::SIN_WINDOW_2048;
+#![allow(clippy::needless_range_loop)]
+#![allow(clippy::explicit_counter_loop)]
+//!
+//! Port of libvorbis `lib/window.c` `_vorbis_apply_window` supporting both
+//! long (n=2048) and short (n=256) blocks and their transitions.
+//!
+//! Window transition logic:
+//!   _vorbis_apply_window(d, winno, blocksizes, lW, W, nW):
+//!     - lW=(W?lW:0), nW=(W?nW:0)
+//!     - windowLW = vwin[winno[lW]], windowNW = vwin[winno[nW]]
+//!     - n = blocksizes[W]; ln = blocksizes[lW]; rn = blocksizes[nW]
+//!     - leftbegin = n/4 - ln/4, leftend = leftbegin + ln/2
+//!     - rightbegin = n/2 + n/4 - rn/4, rightend = rightbegin + rn/2
+//!     - d[0..leftbegin] = 0
+//!     - d[leftbegin..leftend] *= windowLW[0..ln/2]
+//!     - d[rightbegin..rightend] *= windowNW[rn/2-1..0] (reversed)
+//!     - d[rightend..n] = 0
+//!
+//! For Q5 (blocksizes[0]=256, blocksizes[1]=2048):
+//!   winno[0] = ilog(256)-7 = 1 → vwin[1] = vwin128 (128 values, our WIN_HALF_256)
+//!   winno[1] = ilog(2048)-7 = 4 → vwin[4] = vwin1024 (1024 values, our WIN_HALF_2048)
+//!
+//! LIMITATION: Only supports the "first block short, all subsequent long"
+//! pattern. No transient detection. Suitable for non-transient test corpora
+//! (silence, sine, ramp). Real-world audio with attacks would require full
+//! transient detection from libvorbis vorbis_analysis_blockout.
 
-pub(crate) const BLOCK_SIZE: usize = 2048;
-pub(crate) const HALF_BLOCK: usize = BLOCK_SIZE / 2; // 1024
+use crate::tables::window::{WIN_HALF_2048, WIN_HALF_256};
 
-/// Holds the previous 1024-sample block (as f32) for overlap.
+pub(crate) const LONG_BLOCK: usize = 2048;
+pub(crate) const SHORT_BLOCK: usize = 256;
+pub(crate) const LONG_HALF: usize = LONG_BLOCK / 2; // 1024
+pub(crate) const SHORT_HALF: usize = SHORT_BLOCK / 2; // 128
+
+pub(crate) const BLOCK_SIZE: usize = LONG_BLOCK;
+pub(crate) const HALF_BLOCK: usize = LONG_HALF;
+
+/// Apply _vorbis_apply_window for a block of size `n`.
+///
+/// `lW`: is the previous block long? (false=short, true=long)
+/// `w`: is the current block long? (false=short, true=long)
+/// `nW`: is the next block long? (false=short, true=long)
+///
+/// For short blocks (W=0), lW and nW are forced to 0 regardless.
+/// The `d` slice must have length n.
+fn apply_window(d: &mut [f32], lw: bool, w: bool, nw: bool) {
+    let lw = if w { lw } else { false };
+    let nw = if w { nw } else { false };
+
+    let n = if w { LONG_BLOCK } else { SHORT_BLOCK };
+    let ln = if lw { LONG_BLOCK } else { SHORT_BLOCK };
+    let rn = if nw { LONG_BLOCK } else { SHORT_BLOCK };
+
+    let window_lw: &[f32] = if lw { &WIN_HALF_2048 } else { &WIN_HALF_256 };
+    let window_nw: &[f32] = if nw { &WIN_HALF_2048 } else { &WIN_HALF_256 };
+
+    let leftbegin = n / 4 - ln / 4;
+    let leftend = leftbegin + ln / 2;
+    let rightbegin = n / 2 + n / 4 - rn / 4;
+    let rightend = rightbegin + rn / 2;
+
+    for i in 0..leftbegin {
+        d[i] = 0.0;
+    }
+
+    let mut p: usize = 0;
+    for i in leftbegin..leftend {
+        d[i] *= window_lw[p];
+        p += 1;
+    }
+
+    let mut p: usize = rn / 2 - 1;
+    for i in rightbegin..rightend {
+        d[i] *= window_nw[p];
+        p = p.wrapping_sub(1);
+    }
+
+    for i in rightend..n {
+        d[i] = 0.0;
+    }
+}
+
+/// Holds state for windowing between blocks.
 pub(crate) struct WindowingBuffer {
-    prev: [f32; HALF_BLOCK],
+    /// Previous 1024 samples (long block overlap buffer).
+    prev_long: [f32; LONG_HALF],
+    /// Previous 128 samples (short block overlap buffer).
+    prev_short: [f32; SHORT_HALF],
+    /// Was the previous block a long block?
+    prev_is_long: bool,
 }
 
 impl WindowingBuffer {
     pub(crate) fn new() -> Self {
         Self {
-            prev: [0.0f32; HALF_BLOCK],
+            prev_long: [0.0f32; LONG_HALF],
+            prev_short: [0.0f32; SHORT_HALF],
+            prev_is_long: false,
         }
     }
 
-    /// Produce a 2048-sample windowed block from the previous + current halves.
+    /// Produce a windowed long (2048-sample) block.
     ///
-    /// `current` is exactly 1024 new PCM samples (already as f32).
-    /// Returns the 2048-sample windowed block ready for MDCT.
-    pub(crate) fn push_block(&mut self, current: &[f32; HALF_BLOCK]) -> [f32; BLOCK_SIZE] {
-        let mut out = [0.0f32; BLOCK_SIZE];
+    /// `current` is the next LONG_HALF = 1024 PCM samples.
+    /// `nw_is_long`: is the next block long?
+    pub(crate) fn push_long_block(
+        &mut self,
+        current: &[f32; LONG_HALF],
+        nw_is_long: bool,
+    ) -> [f32; LONG_BLOCK] {
+        let lw = self.prev_is_long;
+        let mut out = [0.0f32; LONG_BLOCK];
 
-        // Build un-windowed 2048-sample block: [prev | current]
-        out[..HALF_BLOCK].copy_from_slice(&self.prev);
-        out[HALF_BLOCK..].copy_from_slice(current);
-
-        // Apply window: port of _vorbis_apply_window with lW=1, W=1, nW=1
-        // blocksizes[1]=2048, ln=rn=n=2048
-        // leftbegin=0, leftend=1024, rightbegin=1024, rightend=2048
-        // Left half: out[i] *= windowLW[i] for i in 0..1024
-        // Right half: out[i] *= windowNW[rn/2-1 - (i-rightbegin)] for i in 1024..2048
-        //   = out[i] *= SIN_WINDOW_2048[1023 - (i - 1024)] = SIN_WINDOW_2048[2047 - i]
-        // But our SIN_WINDOW_2048 is the full 2048-point symmetric window,
-        // where the left half IS the vwin2048 half-window.
-        // SIN_WINDOW_2048[i] = window value at position i in the full block.
-        for i in 0..BLOCK_SIZE {
-            out[i] *= SIN_WINDOW_2048[i];
+        if lw {
+            // prev was long: copy prev_long into left half
+            out[..LONG_HALF].copy_from_slice(&self.prev_long);
+        } else {
+            // prev was short: center the short overlap in the left half
+            // leftbegin = 2048/4 - 256/4 = 512 - 64 = 448
+            // leftend = 448 + 128 = 576
+            // The overlap region from the short block occupies [448..576]
+            let leftbegin = LONG_BLOCK / 4 - SHORT_BLOCK / 4;
+            let leftend = leftbegin + SHORT_HALF;
+            out[leftbegin..leftend].copy_from_slice(&self.prev_short);
+            // Samples [0..448] and [576..1024] remain 0 (already zero-initialized)
         }
 
-        // Save current as previous for next call
-        self.prev.copy_from_slice(current);
+        // Right half: current samples
+        out[LONG_HALF..].copy_from_slice(current);
+
+        // Apply the transition window
+        apply_window(&mut out, lw, true, nw_is_long);
+
+        // Update state
+        self.prev_long.copy_from_slice(current);
+        self.prev_is_long = true;
 
         out
+    }
+
+    /// Produce a windowed short (256-sample) block.
+    ///
+    /// `current` is the next SHORT_HALF = 128 PCM samples.
+    pub(crate) fn push_short_block(&mut self, current: &[f32; SHORT_HALF]) -> [f32; SHORT_BLOCK] {
+        let mut out = [0.0f32; SHORT_BLOCK];
+
+        // Build un-windowed 256-sample block: [prev_short | current]
+        out[..SHORT_HALF].copy_from_slice(&self.prev_short);
+        out[SHORT_HALF..].copy_from_slice(current);
+
+        // Apply window: W=0 → lW=0, nW=0 (forced by _vorbis_apply_window)
+        apply_window(&mut out, false, false, false);
+
+        // Update state
+        self.prev_short.copy_from_slice(current);
+        self.prev_is_long = false;
+
+        out
+    }
+
+    #[cfg(test)]
+    pub(crate) fn push_block(&mut self, current: &[f32; HALF_BLOCK]) -> [f32; BLOCK_SIZE] {
+        self.push_long_block(current, true)
     }
 }
 
@@ -106,6 +214,34 @@ mod tests {
                 (got - exp).abs() < 1e-6,
                 "out[{i}] = {} expected {}",
                 got,
+                exp
+            );
+        }
+    }
+
+    #[test]
+    fn short_block_window_is_symmetric() {
+        let mut buf = WindowingBuffer::new();
+        let block = [1.0f32; SHORT_HALF];
+
+        let out = buf.push_short_block(&block);
+
+        // First half is prev=zeros, second half is ones
+        // After windowing:
+        //   leftbegin=0, leftend=128, rightbegin=128, rightend=256
+        //   d[0..128] *= WIN_HALF_256[0..128]  (but d[0..128] = 0, so stays 0)
+        //   d[128..256] *= WIN_HALF_256[127..0] reversed
+        for v in &out[..SHORT_HALF] {
+            assert_eq!(*v, 0.0, "short block first half should be zero (prev=0)");
+        }
+        // Second half should equal WIN_HALF_256 reversed
+        for (i, &v) in out[SHORT_HALF..].iter().enumerate() {
+            let exp = WIN_HALF_256[SHORT_HALF - 1 - i];
+            assert!(
+                (v - exp).abs() < 1e-6,
+                "short block out[{}] = {} expected {}",
+                SHORT_HALF + i,
+                v,
                 exp
             );
         }
