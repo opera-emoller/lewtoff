@@ -36,8 +36,10 @@ pub mod mdct;
 #[doc(hidden)]
 pub mod ogg_pages;
 
+mod drft;
 #[doc(hidden)]
 pub mod encode;
+mod lpc;
 mod mapping0;
 mod setup;
 mod window;
