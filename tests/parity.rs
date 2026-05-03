@@ -258,13 +258,23 @@ fn oracle_parity_sine_440_mono44() {
 }
 
 #[test]
-#[ignore = "non-silence parity not yet achieved — floor/residue encoding diverges for tonal audio"]
+#[ignore = "ffmpeg-built libvorbis differs from oracle (FMA, optimization). Use oracle_parity_ramp_stereo44 instead."]
 fn parity_ramp_stereo44() {
     let n = 44100usize;
     let samples: Vec<i16> = (0..n * 2)
         .map(|i| ((i % 65536) as i32 - 32768) as i16)
         .collect();
     assert_parity(&samples, SampleRate::Hz44100, Channels::Stereo);
+}
+
+#[test]
+#[ignore = "stereo ramp parity not yet achieved — likely stereo coupling / ramp-specific psy"]
+fn oracle_parity_ramp_stereo44() {
+    let n = 44100usize;
+    let samples: Vec<i16> = (0..n * 2)
+        .map(|i| ((i % 65536) as i32 - 32768) as i16)
+        .collect();
+    assert_parity_oracle(&samples, SampleRate::Hz44100, Channels::Stereo);
 }
 
 #[test]
