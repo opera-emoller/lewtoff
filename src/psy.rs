@@ -1266,11 +1266,12 @@ fn noise_normalize(
         };
         if !skip {
             let ve = q[j] / f[j];
-            out[j] = if r[j] < 0.0 {
-                -(ve.sqrt().round() as i32)
-            } else {
-                ve.sqrt().round() as i32
-            };
+            // libvorbis: `out[j] = -rint(sqrt(ve));` — sqrt() is the f64
+            // overload (promotes f32 ve to f64), rint() rounds half-to-even.
+            // Rust's f32::sqrt is single-precision and .round() rounds
+            // half-away-from-zero; both diverge from C.
+            let s = (ve as f64).sqrt().round_ties_even();
+            out[j] = if r[j] < 0.0 { -(s as i32) } else { s as i32 };
         }
     }
 
