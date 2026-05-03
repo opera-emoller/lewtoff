@@ -183,29 +183,45 @@ pub(crate) fn unpack_q5_setup(
     for _ in 0..residues_count {
         let residue_type = r.read(16) as u16;
         let mut setup = unpack_residue(&mut r, books_count)?;
-        // Wire up classmetric1/classmetric2 from libvorbis _residue_44_*_un templates.
-        // The setup blob doesn't carry these values; they're hardcoded per template
-        // and selected in vorbis_encode_residue_setup based on quality. For Q5 mono
-        // (uncoupled), both short and long use _residue_44_mid_un. For Q5 stereo
-        // (coupled), the setup uses different templates — see residue_44.h.
-        // Heuristic: pick template by partition count + grouping. partitions=10
-        // with grouping ∈ {16, 32} → mid_un (Q5 mono).
+        // Wire up classmetric1/classmetric2 from libvorbis residue templates.
+        // The setup blob doesn't carry these values; they're hardcoded per
+        // template and selected in vorbis_encode_residue_setup based on quality
+        // and channel layout. residue_type:
+        //   1 = uncoupled (mono) → _residue_44_*_un templates
+        //   2 = coupled (stereo, interleaved) → _residue_44_* templates
+        // Both share the same partition counts but have different classmetric
+        // values; see lib/modes/residue_44.h.
+        let coupled = residue_type == 2;
         if setup.partitions == 10 {
-            // _residue_44_mid_un classmetric values
-            let cm1 = [0i32, 1, 1, 2, 2, 4, 4, 16, 60];
-            let cm2 = [-1i32, 30, -1, 50, -1, 80, -1, -1, -1];
+            let (cm1, cm2): ([i32; 9], [i32; 9]) = if coupled {
+                // _residue_44_mid (Q5 stereo, partitions=10)
+                (
+                    [0, 1, 1, 2, 2, 4, 8, 16, 32],
+                    [0, 0, 999, 0, 999, 4, 8, 16, 32],
+                )
+            } else {
+                // _residue_44_mid_un (Q5 mono, partitions=10)
+                (
+                    [0, 1, 1, 2, 2, 4, 4, 16, 60],
+                    [-1, 30, -1, 50, -1, 80, -1, -1, -1],
+                )
+            };
             for (i, &v) in cm1.iter().enumerate() {
                 setup.classmetric1[i] = v;
             }
             for (i, &v) in cm2.iter().enumerate() {
                 setup.classmetric2[i] = v;
             }
-            // index 9 stays as default (0 / -1 default; libvorbis treats unset as 0)
             setup.classmetric1[9] = 0;
             setup.classmetric2[9] = 0;
         } else if setup.partitions == 8 {
-            let cm1 = [0i32, 1, 1, 2, 2, 4, 28];
-            let cm2 = [-1i32, 25, -1, 45, -1, -1, -1];
+            let (cm1, cm2): ([i32; 7], [i32; 7]) = if coupled {
+                // _residue_44_low classmetric values
+                ([0, 1, 2, 2, 4, 8, 16], [0, 0, 0, 999, 4, 8, 16])
+            } else {
+                // _residue_44_low_un (current mono case)
+                ([0, 1, 1, 2, 2, 4, 28], [-1, 25, -1, 45, -1, -1, -1])
+            };
             for (i, &v) in cm1.iter().enumerate() {
                 setup.classmetric1[i] = v;
             }

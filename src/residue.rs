@@ -388,7 +388,7 @@ fn _encodepart(opb: &mut BitWriter, vec: &mut [i32], n: usize, book: &Codebook) 
             use std::sync::atomic::{AtomicUsize, Ordering};
             static N: AtomicUsize = AtomicUsize::new(0);
             let n = N.fetch_add(1, Ordering::Relaxed);
-            if n < 60 {
+            if n < 400 {
                 let mut s = format!(
                     "R_BESTERR n={} dim={} step_i={} entry={} vec_in=[",
                     n, dim, i, entry
@@ -442,6 +442,9 @@ pub(crate) fn _01class(
     // Then `ent *= scale` is int*float in f32. Match exactly.
     let scale: f32 = (100.0_f64 / samples_per_partition as f64) as f32;
     if std::env::var("LW_DEBUG_RES").is_ok() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static N: AtomicUsize = AtomicUsize::new(0);
+        let _n = N.fetch_add(1, Ordering::Relaxed);
         eprintln!(
             "R_RES_INFO: possible_partitions={} samples_per_part={} begin={} end={} partvals={}",
             possible_partitions, samples_per_partition, info.begin, info.end, partvals
@@ -526,6 +529,15 @@ pub(crate) fn _2class(
     let n = (info.end - info.begin) as usize;
 
     let partvals = n / samples_per_partition;
+    let dbg_part = std::env::var("LW_DEBUG_PARTWORD").is_ok();
+    if dbg_part {
+        eprintln!(
+            "R_2CLASS_IN partvals={} cm1={:?} cm2={:?}",
+            partvals,
+            &info.classmetric1[..possible_partitions],
+            &info.classmetric2[..possible_partitions]
+        );
+    }
     let mut partword: Vec<Vec<i64>> = vec![vec![0i64; partvals]];
 
     let mut l = (info.begin as usize) / ch;
@@ -556,6 +568,12 @@ pub(crate) fn _2class(
             jj += 1;
         }
 
+        if dbg_part && i < 16 {
+            eprintln!(
+                "R_2CLASS i={} magmax={} angmax={} class={}",
+                i, magmax, angmax, jj
+            );
+        }
         partword[0][i] = jj as i64;
     }
 
