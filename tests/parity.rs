@@ -58,6 +58,43 @@ fn extract_serial(ogg_bytes: &[u8]) -> u32 {
     u32::from_le_bytes(ogg_bytes[14..18].try_into().unwrap())
 }
 
+/// Extract the vendor string and first user comment (encoder tag) from a
+/// Vorbis comment header packet embedded in the given OGG bitstream.
+///
+/// The comment header is the second packet in the stream (second OGG page,
+/// first segment).  Returns (vendor, encoder_tag) as owned Vec<u8>.
+fn extract_comment_strings(ogg_bytes: &[u8]) -> (Vec<u8>, Vec<u8>) {
+    assert!(ogg_bytes.len() >= 58, "OGG output too short");
+    let page0_len = {
+        let page_segs = ogg_bytes[26] as usize;
+        let seg_table = &ogg_bytes[27..27 + page_segs];
+        let data_len: usize = seg_table.iter().map(|&s| s as usize).sum();
+        27 + page_segs + data_len
+    };
+    let page1 = &ogg_bytes[page0_len..];
+    assert!(page1.len() >= 27, "page1 too short");
+    let page1_segs = page1[26] as usize;
+    assert!(page1.len() >= 27 + page1_segs, "page1 seg table too short");
+    let first_pkt_len = page1[27] as usize;
+    let pkt = &page1[27 + page1_segs..27 + page1_segs + first_pkt_len];
+
+    let mut off = 7usize;
+    let vlen = u32::from_le_bytes(pkt[off..off + 4].try_into().unwrap()) as usize;
+    off += 4;
+    let vendor = pkt[off..off + vlen].to_vec();
+    off += vlen;
+    let count = u32::from_le_bytes(pkt[off..off + 4].try_into().unwrap()) as usize;
+    off += 4;
+    let encoder_tag = if count > 0 {
+        let clen = u32::from_le_bytes(pkt[off..off + 4].try_into().unwrap()) as usize;
+        off += 4;
+        pkt[off..off + clen].to_vec()
+    } else {
+        Vec::new()
+    };
+    (vendor, encoder_tag)
+}
+
 fn first_diff(a: &[u8], b: &[u8]) -> usize {
     let common = a.len().min(b.len());
     for i in 0..common {
@@ -80,7 +117,15 @@ fn assert_parity(samples: &[i16], rate: SampleRate, channels: Channels) {
 
     let ffmpeg_bytes = ffmpeg_encode_q5(samples, rate_hz, ch);
     let serial = extract_serial(&ffmpeg_bytes);
-    let lewtoff_bytes = lewtoff::encode_with_serial(samples, rate, channels, serial);
+    let (vendor, encoder_tag) = extract_comment_strings(&ffmpeg_bytes);
+    let lewtoff_bytes = lewtoff::encode_with_serial_and_meta(
+        samples,
+        rate,
+        channels,
+        serial,
+        Some(&vendor),
+        Some(&encoder_tag),
+    );
 
     if lewtoff_bytes != ffmpeg_bytes {
         let div = first_diff(&lewtoff_bytes, &ffmpeg_bytes);

@@ -73,3 +73,18 @@ pub fn encode_with_serial(
 ) -> Vec<u8> {
     crate::encode::encode_with_serial(samples, rate, channels, serial)
 }
+
+/// Like [`encode_with_serial`] but also accepts vendor and encoder_tag strings
+/// to embed in the comment header.  Pass `None` to use compile-time defaults.
+/// Exposed for parity tests so the test can mirror the exact ffmpeg version in CI.
+#[doc(hidden)]
+pub fn encode_with_serial_and_meta(
+    samples: &[i16],
+    rate: SampleRate,
+    channels: Channels,
+    serial: u32,
+    vendor: Option<&[u8]>,
+    encoder_tag: Option<&[u8]>,
+) -> Vec<u8> {
+    crate::encode::encode_with_serial_and_meta(samples, rate, channels, serial, vendor, encoder_tag)
+}

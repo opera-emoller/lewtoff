@@ -8,7 +8,7 @@
 #![allow(clippy::manual_memcpy)]
 
 use crate::bitpack::BitWriter;
-use crate::headers::{write_comment_header, write_id_header, write_setup_header};
+use crate::headers::{write_comment_header_with_strings, write_id_header, write_setup_header};
 use crate::mapping0::{mapping0_forward, BlockMode};
 use crate::ogg_pages::OggStreamWriter;
 use crate::psy::{
@@ -263,7 +263,7 @@ fn random_serial() -> u32 {
 }
 
 pub(crate) fn encode_impl(samples: &[i16], rate: SampleRate, channels: Channels) -> Vec<u8> {
-    encode_with_serial(samples, rate, channels, random_serial())
+    encode_with_serial_and_meta(samples, rate, channels, random_serial(), None, None)
 }
 
 pub(crate) fn encode_with_serial(
@@ -271,6 +271,17 @@ pub(crate) fn encode_with_serial(
     rate: SampleRate,
     channels: Channels,
     serial: u32,
+) -> Vec<u8> {
+    encode_with_serial_and_meta(samples, rate, channels, serial, None, None)
+}
+
+pub(crate) fn encode_with_serial_and_meta(
+    samples: &[i16],
+    rate: SampleRate,
+    channels: Channels,
+    serial: u32,
+    vendor: Option<&[u8]>,
+    encoder_tag: Option<&[u8]>,
 ) -> Vec<u8> {
     let ch = match channels {
         Channels::Mono => 1usize,
@@ -348,7 +359,7 @@ pub(crate) fn encode_with_serial(
     }
     {
         let mut w = BitWriter::new();
-        write_comment_header(&mut w);
+        write_comment_header_with_strings(&mut w, vendor, encoder_tag);
         ogg.write_packet(&w.into_bytes(), 0, false, false);
     }
     {

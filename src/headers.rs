@@ -64,27 +64,40 @@ pub fn write_id_header(rate: SampleRate, channels: Channels, w: &mut BitWriter) 
 
 /// Write the Vorbis comment header packet (packet type 0x03).
 ///
-/// Per Vorbis I §4.2.3. The vendor string and encoder tag match what
-/// ffmpeg-libvorbis writes on the reference machine.
-pub fn write_comment_header(w: &mut BitWriter) {
+/// Per Vorbis I §4.2.3. Uses the provided vendor and encoder_tag strings
+/// so the comment header matches exactly the ffmpeg version on the current
+/// machine.  Pass `None` to use the compile-time defaults.
+pub fn write_comment_header_with_strings(
+    w: &mut BitWriter,
+    vendor: Option<&[u8]>,
+    encoder_tag: Option<&[u8]>,
+) {
+    let vendor = vendor.unwrap_or(VENDOR);
+    let encoder_tag = encoder_tag.unwrap_or(ENCODER_TAG);
+
     w.write(0x03, 8);
     for &b in b"vorbis" {
         w.write(b as u32, 8);
     }
 
-    w.write(VENDOR.len() as u32, 32);
-    for &b in VENDOR {
+    w.write(vendor.len() as u32, 32);
+    for &b in vendor {
         w.write(b as u32, 8);
     }
 
     w.write(1, 32);
 
-    w.write(ENCODER_TAG.len() as u32, 32);
-    for &b in ENCODER_TAG {
+    w.write(encoder_tag.len() as u32, 32);
+    for &b in encoder_tag {
         w.write(b as u32, 8);
     }
 
     w.write(1, 1);
+}
+
+/// Write the Vorbis comment header using compile-time vendor/encoder strings.
+pub fn write_comment_header(w: &mut BitWriter) {
+    write_comment_header_with_strings(w, None, None);
 }
 
 /// Write the Vorbis setup header packet (packet type 0x05).
