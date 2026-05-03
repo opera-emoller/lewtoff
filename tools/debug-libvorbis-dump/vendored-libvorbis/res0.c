@@ -639,8 +639,17 @@ static int _01forward(oggpack_buffer *opb,
           }
 
           /* training hack */
-          if(val<look->phrasebook->entries)
+          if(val<look->phrasebook->entries) {
+            {
+              static int n_pb=0;
+              if (n_pb < 30) {
+                fprintf(stderr, "C_PHRASE n=%d s=%ld i=%ld j=%ld val=%ld stages=%d ppw=%d partvals=%d\n",
+                        n_pb, s, i, j, val, look->stages, partitions_per_word, partvals);
+                n_pb++;
+              }
+            }
             look->phrasebits+=vorbis_book_encode(look->phrasebook,val,opb);
+          }
 #if 0 /*def TRAIN_RES*/
           else
             fprintf(stderr,"!");

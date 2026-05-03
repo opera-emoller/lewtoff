@@ -799,6 +799,17 @@ fn _01forward_indexed(
                         }
                     }
                     if val < look.phrasebook_entries as i64 {
+                        if std::env::var("LW_DEBUG_PHRASE").is_ok() {
+                            use std::sync::atomic::{AtomicUsize, Ordering};
+                            static N: AtomicUsize = AtomicUsize::new(0);
+                            let n = N.fetch_add(1, Ordering::Relaxed);
+                            if n < 30 {
+                                eprintln!(
+                                    "R_PHRASE n={} s={} i={} j={} val={} stages={} ppw={} partvals={}",
+                                    n, s, i, j, val, look.stages, partitions_per_word, partvals
+                                );
+                            }
+                        }
                         let phrasebook = &books[look.phrasebook_idx];
                         vorbis_book_encode(phrasebook, val as i32, opb);
                     }

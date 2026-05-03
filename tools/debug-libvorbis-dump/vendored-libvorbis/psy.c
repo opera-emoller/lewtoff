@@ -343,11 +343,28 @@ void _vp_psy_init(vorbis_look_psy *p,vorbis_info_psy *vi,
   for(i=0;i<n;i++)
     p->octave[i]=toOC((i+.25f)*.5*rate/n)*(1<<(p->shiftoc+1))+.5f;
 
-  /* DEBUG: dump curveatt_db (toneatt) */
+  /* DEBUG: dump curveatt_db (toneatt) - dumps for EACH psy_init call */
   {
     static int afired=0;
-    if(!afired){
-      afired=1;
+    afired++;
+    if(afired<=4){
+      char fnt[256], fno[256];
+      snprintf(fnt,sizeof(fnt),"/tmp/lewtoff-debug/c_toneatt_%d.bin", afired);
+      snprintf(fno,sizeof(fno),"/tmp/lewtoff-debug/c_psy_%d.bin", afired);
+      FILE *fff=fopen(fnt,"wb");
+      if(fff){ fwrite(vi->toneatt, sizeof(float), 17, fff); fclose(fff); }
+      fprintf(stderr, "C_PSY_INIT_%d: blockflag=%d n=%d toneatt[10]=%f noisemaxsupp=%f tone_masteratt=[%f,%f,%f]\n",
+              afired, vi->blockflag, n, vi->toneatt[10], vi->noisemaxsupp,
+              vi->tone_masteratt[0], vi->tone_masteratt[1], vi->tone_masteratt[2]);
+      FILE *fpsi = fopen(fno, "wb");
+      if (fpsi) {
+        fwrite(vi->noiseoff[0], sizeof(float), 17, fpsi);
+        fwrite(vi->noiseoff[1], sizeof(float), 17, fpsi);
+        fwrite(vi->noiseoff[2], sizeof(float), 17, fpsi);
+        fclose(fpsi);
+      }
+    }
+    if(afired==1){
       FILE *fff=fopen("/tmp/lewtoff-debug/c_toneatt.bin","wb");
       if(fff){ fwrite(vi->toneatt, sizeof(float), 17, fff); fclose(fff); }
       fprintf(stderr, "C_TONEATT[10]=%f, centerboost=%f, decay=%f\n",
