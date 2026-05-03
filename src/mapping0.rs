@@ -255,6 +255,28 @@ pub(crate) fn mapping0_forward(
         // Noise mask
         vp_noisemask(psy_look, &logmdct, &mut noise_bufs[i]);
 
+        if std::env::var("LW_DEBUG_NOISE220").is_ok() && n == LONG_BLOCK && i == 0 {
+            use std::sync::atomic::{AtomicUsize, Ordering};
+            static N: AtomicUsize = AtomicUsize::new(0);
+            let idx = N.fetch_add(1, Ordering::Relaxed);
+            if idx == 4 {
+                let mut bytes = Vec::with_capacity(n2 * 4);
+                for v in &logmdct {
+                    bytes.extend_from_slice(&v.to_le_bytes());
+                }
+                std::fs::write("/tmp/r_logmdct_blk11.bin", &bytes).ok();
+                let mut bytes = Vec::with_capacity(n2 * 4);
+                for v in &noise_bufs[i] {
+                    bytes.extend_from_slice(&v.to_le_bytes());
+                }
+                std::fs::write("/tmp/r_noise_blk11.bin", &bytes).ok();
+                eprintln!(
+                    "R_NOISE220 idx={}: bin220={:.10} bin219={:.10} bin221={:.10}",
+                    idx, noise_bufs[i][220], noise_bufs[i][219], noise_bufs[i][221],
+                );
+            }
+        }
+
         // Tone mask
         vp_tonemask(
             psy_look,

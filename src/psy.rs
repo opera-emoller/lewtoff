@@ -523,21 +523,30 @@ pub fn vp_psy_init(
     }
 
     // bark array
+    //
+    // libvorbis psy.c uses INTEGER division `rate/(2*n)*i` here, where rate
+    // is long and n/i are int. The truncation matters: at rate=44100, n=1024
+    // we get 44100/2048 = 21 (integer) instead of the exact 21.5332. The
+    // window-edge calculation depends on this so the integer truncation must
+    // be reproduced literally — using float division here flips a few bark
+    // window `hi` values by 1 bin (visible in noise[] starting around bin
+    // 118 for some inputs).
     {
+        let bin_hz = rate / (2 * n as i64); // integer division to match C
         let mut lo: i64 = -99;
         let mut hi: i64 = 1;
         for i in 0..n {
-            let bark = to_bark(rate as f32 / (2 * n) as f32 * i as f32);
+            let bark = to_bark((bin_hz * i as i64) as f32);
 
             while lo + (vi.noisewindowlomin as i64) < i as i64
-                && to_bark(rate as f32 / (2 * n) as f32 * lo as f32) < bark - vi.noisewindowlo
+                && to_bark((bin_hz * lo) as f32) < bark - vi.noisewindowlo
             {
                 lo += 1;
             }
 
             while hi <= n as i64
                 && (hi < i as i64 + vi.noisewindowhimin as i64
-                    || to_bark(rate as f32 / (2 * n) as f32 * hi as f32) < bark + vi.noisewindowhi)
+                    || to_bark((bin_hz * hi) as f32) < bark + vi.noisewindowhi)
             {
                 hi += 1;
             }
@@ -952,6 +961,21 @@ fn bark_noise_hybridmp(n: usize, b: &[i64], f: &[f32], noise: &mut [f32], offset
         if (12..=16).contains(&i) && std::env::var("LW_DEBUG_BNH").is_ok() {
             eprintln!("LW_BNH i={} lo={} hi={} x={:.1} tn={:.6} tx={:.6} txx={:.6} ty={:.6} txy={:.6} A={:.6} B={:.6} D={:.6} R={:.6} noise={:.6} offset={:.6}",
                 i, lo, hi, x, tn, tx, txx, ty, txy, big_a, big_b, big_d, r, r - offset, offset);
+        }
+        if (i == 118 || i == 127) && std::env::var("LW_DEBUG_BNH118").is_ok() {
+            eprintln!(
+                "LW_BNH i={} lo={} hi={} x={} tn={}(0x{:08x}) ty={}(0x{:08x}) txx={}(0x{:08x}) tx={}(0x{:08x}) txy={}(0x{:08x}) A={}(0x{:08x}) B={}(0x{:08x}) D={}(0x{:08x}) R={}(0x{:08x})",
+                i, lo, hi, x,
+                tn, tn.to_bits(),
+                ty, ty.to_bits(),
+                txx, txx.to_bits(),
+                tx, tx.to_bits(),
+                txy, txy.to_bits(),
+                big_a, big_a.to_bits(),
+                big_b, big_b.to_bits(),
+                big_d, big_d.to_bits(),
+                r, r.to_bits(),
+            );
         }
 
         if r < 0.0 {
