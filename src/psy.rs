@@ -1191,6 +1191,7 @@ fn noise_normalize(
 // VorbisInfoMapping0 — minimal subset needed for _vp_couple_quantize_normalize
 // ---------------------------------------------------------------------------
 
+#[derive(Debug, Clone)]
 pub struct VorbisInfoMapping0 {
     pub coupling_steps: usize,
     pub coupling_mag: Vec<usize>,

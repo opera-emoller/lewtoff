@@ -36,6 +36,11 @@ pub mod mdct;
 #[doc(hidden)]
 pub mod ogg_pages;
 
+mod encode;
+mod mapping0;
+mod setup;
+mod window;
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum SampleRate {
     Hz44100,
@@ -52,6 +57,6 @@ pub enum Channels {
 ///
 /// Output is byte-for-byte identical to `ffmpeg -c:a libvorbis -q:a 5` for the
 /// supported input space (see crate docs / `README.md`).
-pub fn encode(_samples: &[i16], _rate: SampleRate, _channels: Channels) -> Vec<u8> {
-    unimplemented!("not yet implemented — see Phase 9 in README.md")
+pub fn encode(samples: &[i16], rate: SampleRate, channels: Channels) -> Vec<u8> {
+    crate::encode::encode_impl(samples, rate, channels)
 }
