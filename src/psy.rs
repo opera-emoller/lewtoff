@@ -1145,18 +1145,22 @@ pub fn vp_offset_and_mix(
         logmask[i] = val.max(tone[i] + toneatt);
 
         if offset_select == 1 {
-            let coeffi: f32 = -17.2;
-            let val2 = val - logmdct[i];
+            // C: coeffi = -17.2 (double), 0.005, 0.0003 (double), 1.0 (double).
+            // val and cx are float; expression promotes to double; result cast
+            // to float when stored in mdct[i] *= de.
+            let coeffi: f64 = -17.2;
+            let val2 = val as f64 - logmdct[i] as f64;
+            let cx_f64 = cx as f64;
 
-            let de = if val2 > coeffi {
-                let d = 1.0 - (val2 - coeffi) * 0.005 * cx;
+            let de: f32 = if val2 > coeffi {
+                let d = 1.0 - (val2 - coeffi) * 0.005 * cx_f64;
                 if d < 0.0 {
-                    0.0001
+                    0.0001_f32
                 } else {
-                    d
+                    d as f32
                 }
             } else {
-                1.0 - (val2 - coeffi) * 0.0003 * cx
+                (1.0 - (val2 - coeffi) * 0.0003 * cx_f64) as f32
             };
 
             mdct[i] *= de;
