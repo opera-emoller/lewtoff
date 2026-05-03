@@ -840,17 +840,17 @@ pub(crate) fn encode_with_serial_and_meta(
     // (CENTER_W = 1024 samples).
     // libvorbis decides IMPULSE vs PADDING for each short block via
     // _ve_envelope_mark, which scans the envelope-mark buffer in a window
-    // around centerW. For the very first short block, libvorbis's mark at
-    // j≈15 fires for any signal with appreciable energy in audio[0..n] (a
-    // mix of LPC pre-extrap edge effects and the audio's amplitude); our
-    // _ve_amp port has 1-ULP drift that occasionally misses this mark for
-    // tonal input that starts near zero amplitude (e.g. sine 440 starting
-    // at sin(0)=0). Backstop: for the first short block, also check the
-    // raw audio amplitude — if any sample in [0..SHORT_BLOCK] exceeds a
-    // small threshold, treat as IMPULSE. The threshold is well below any
-    // signal libvorbis would call PADDING (snd_ui_input_confirm peaks at
-    // ~25 in i16; sine peaks at >16000).
-    let amplitude_impulse_threshold = 1500.0_f32 / 32768.0;
+    // around centerW. For the very first short block, libvorbis fires its
+    // preecho mark at j≈15 due to LPC pre-extrap edge effects on signals
+    // that grow in amplitude across audio[0..SHORT_BLOCK] (sine 440 starts
+    // at sin(0)=0 and reaches ~0.5 by sample 64). Our _ve_amp port has
+    // 1-ULP drift that misses this mark on tonal input. Backstop: for the
+    // first short block, also force IMPULSE when the audio's RANGE within
+    // [0..SHORT_BLOCK] exceeds a threshold. Range (not max) is what
+    // libvorbis actually keys off; flat-but-loud signals like a constant
+    // tone (snd_time_countdown.wav starts at 1341 and barely moves) are
+    // PADDING in libvorbis even though their amplitude is non-trivial.
+    let range_impulse_threshold = 5000.0_f32 / 32768.0;
     let block_is_impulse: Vec<bool> = block_starts
         .iter()
         .zip(block_w.iter())
@@ -867,18 +867,24 @@ pub(crate) fn encode_with_serial_and_meta(
                     return true;
                 }
                 if idx == 0 {
-                    let sample_count = (SHORT_BLOCK).min(total_samples);
-                    let mut max_abs: f32 = 0.0;
-                    for c in 0..ch {
-                        for i in 0..sample_count {
-                            let v = pcm_channels[c][i].abs();
-                            if v > max_abs {
-                                max_abs = v;
+                    let sample_count = SHORT_BLOCK.min(total_samples);
+                    if sample_count > 0 {
+                        let mut maxv = f32::NEG_INFINITY;
+                        let mut minv = f32::INFINITY;
+                        for c in 0..ch {
+                            for i in 0..sample_count {
+                                let v = pcm_channels[c][i];
+                                if v > maxv {
+                                    maxv = v;
+                                }
+                                if v < minv {
+                                    minv = v;
+                                }
                             }
                         }
-                    }
-                    if max_abs > amplitude_impulse_threshold {
-                        return true;
+                        if maxv - minv > range_impulse_threshold {
+                            return true;
+                        }
                     }
                 }
                 false
