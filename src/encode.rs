@@ -39,22 +39,31 @@ fn make_q5_psy_global(rate: i64, channels: usize) -> VorbisInfoPsyGlobal {
     let mut gi = VorbisInfoPsyGlobal::default();
     gi.eighth_octave_lines = 8;
 
-    // preecho/postecho thresholds from _psy_global_44[2]
-    gi.preecho_thresh[0] = 12.0;
-    gi.preecho_thresh[1] = 10.0;
-    gi.preecho_thresh[2] = 10.0;
-    gi.preecho_thresh[3] = 10.0;
-    gi.preecho_thresh[4] = 10.0;
-    gi.preecho_thresh[5] = 10.0;
-    gi.preecho_thresh[6] = 10.0;
+    // libvorbis interpolates _psy_global_44[is] and _psy_global_44[is+1] using
+    // global_mapping_44[6] = 2.5 for q=0.5. So is=2, ds=0.5 (plus a tiny
+    // q+ε perturbation that's lost to f32 in the relevant calculations).
+    // Preecho/postecho thresholds are halfway between templates 2 and 3:
+    //   template[2] = {12, 10, 10, 10, 10, 10, 10}
+    //   template[3] = {10, 8, 8, 8, 8, 8, 8}
+    //   blend (ds=0.5) = {11, 9, 9, 9, 9, 9, 9}
+    //   postecho template[2] = {-20, -20, -15, -15, -15, -15, -15}
+    //   postecho template[3] = {-20, -15, -12, -12, -12, -12, -12}
+    //   blend (ds=0.5) = {-20, -17.5, -13.5, -13.5, -13.5, -13.5, -13.5}
+    gi.preecho_thresh[0] = 11.0;
+    gi.preecho_thresh[1] = 9.0;
+    gi.preecho_thresh[2] = 9.0;
+    gi.preecho_thresh[3] = 9.0;
+    gi.preecho_thresh[4] = 9.0;
+    gi.preecho_thresh[5] = 9.0;
+    gi.preecho_thresh[6] = 9.0;
 
     gi.postecho_thresh[0] = -20.0;
-    gi.postecho_thresh[1] = -20.0;
-    gi.postecho_thresh[2] = -15.0;
-    gi.postecho_thresh[3] = -15.0;
-    gi.postecho_thresh[4] = -15.0;
-    gi.postecho_thresh[5] = -15.0;
-    gi.postecho_thresh[6] = -15.0;
+    gi.postecho_thresh[1] = -17.5;
+    gi.postecho_thresh[2] = -13.5;
+    gi.postecho_thresh[3] = -13.5;
+    gi.postecho_thresh[4] = -13.5;
+    gi.postecho_thresh[5] = -13.5;
+    gi.postecho_thresh[6] = -13.5;
 
     gi.stretch_penalty = 0.0;
     gi.preecho_minenergy = -80.0;

@@ -103,7 +103,9 @@ impl EnvelopeLookup {
                     begin: b,
                     end: e,
                     window: win,
-                    total: 1.0 / total,
+                    // libvorbis: `e->band[j].total = 1./e->band[j].total;` —
+                    // `1.` is double, so the division promotes to f64.
+                    total: (1.0_f64 / total as f64) as f32,
                 }
             })
             .collect();
@@ -177,11 +179,13 @@ impl EnvelopeLookup {
             if band0.nearptr >= VE_NEARDC {
                 band0.nearptr = 0;
             }
-            let decay_scaled = decay * (1.0 / (VE_NEARDC + 1) as f32);
-            // libvorbis's todB(&decay) is 10*log10(decay) (or fast equivalent).
-            // *0.5 then -15 follows.
-            let db = todb(decay_scaled);
-            db * 0.5 - 15.0
+            // libvorbis: `decay *= (1./(VE_NEARDC+1));` — `1./16` is double,
+            // so decay promotes to f64, multiplies, truncates back to f32.
+            let decay_scaled = ((decay as f64) * (1.0_f64 / (VE_NEARDC + 1) as f64)) as f32;
+            // libvorbis: `decay = todB(&decay)*.5-15.f` — todB returns f64
+            // (its 7.17711438e-7 literal is a double), `.5` is double,
+            // `15.f` is float. Whole expression in f64, truncate at assign.
+            (todb(decay_scaled) * 0.5_f64 - 15.0_f32 as f64) as f32
         };
 
         // Spread + limit. Output stored in vec_out[i>>1] (half-size).
@@ -192,7 +196,10 @@ impl EnvelopeLookup {
         let mut i = 0usize;
         while i < n2 {
             let val = vec_out[i] * vec_out[i] + vec_out[i + 1] * vec_out[i + 1];
-            let mut val_db = todb(val) * 0.5;
+            // libvorbis: `val = todB(&val)*.5f` — `.5f` is float. todB
+            // returns f64; multiplied by float .5f → still f64; truncate to
+            // f32 at assign to `val`.
+            let mut val_db = (todb(val) * 0.5_f32 as f64) as f32;
             if val_db < decay {
                 val_db = decay;
             }
@@ -200,7 +207,11 @@ impl EnvelopeLookup {
                 val_db = minv;
             }
             spread[i >> 1] = val_db;
-            decay -= 8.0;
+            // libvorbis: `decay -= 8.;` — `8.` is double, so decay promotes
+            // to f64, subtracts, truncates back. Mirror to keep precision
+            // aligned. (Each j's decay starts as `decay_init` and decrements
+            // by 8 per pair, so any drift here accumulates.)
+            decay = ((decay as f64) - 8.0_f64) as f32;
             i += 2;
         }
 
@@ -252,24 +263,38 @@ impl EnvelopeLookup {
             if valmin < gi.postecho_thresh[j] - penalty {
                 ret |= 2;
             }
+            if std::env::var("LW_DEBUG_AMP").is_ok() {
+                use std::sync::atomic::{AtomicUsize, Ordering};
+                static N: AtomicUsize = AtomicUsize::new(0);
+                let n = N.fetch_add(1, Ordering::Relaxed);
+                if n < 200 {
+                    eprintln!(
+                        "R_AMP band={} acc=0x{:08x} postmax=0x{:08x} premax=0x{:08x} valmax={:.6} thresh={:.6} stretch={}",
+                        j,
+                        acc.to_bits(),
+                        postmax.to_bits(),
+                        premax.to_bits(),
+                        valmax,
+                        gi.preecho_thresh[j],
+                        stretch,
+                    );
+                }
+            }
         }
 
         ret
     }
 }
 
-/// libvorbis `todB` for a single value: returns 10*log10(x*x) with a tiny
-/// epsilon to avoid -inf at zero. Match with f32-precision math throughout.
+/// libvorbis `todB` macro: `((*(int*)x - 0x3F800000) * 7.17711438e-7)`.
+/// The 7.17711438e-7 literal is a DOUBLE in C, so todB always evaluates in
+/// f64 and the caller's expression promotes everything else to f64 too.
+/// Returning f64 here lets callers do `todb(x) * .5 - 15.f` etc. with the
+/// same f32/f64 promotion rules as C.
 #[inline]
-fn todb(x: f32) -> f32 {
-    // libvorbis scales.h: todB(x) = (((*(int *)x) - 0x3F800000) * 7.17711438e-7);
-    // i.e. log2(|x|) approximation via IEEE 754 bit hack, scaled to dB.
-    // x is treated as a single-precision float; bits are reinterpreted.
-    // For x=0 the bit-hack returns -1064.0 dB which matches the libvorbis
-    // sentinel value used elsewhere.
-    const VAL: f32 = 7.17711438e-7;
+fn todb(x: f32) -> f64 {
     let bits = x.to_bits() as i32;
-    (bits - 0x3F80_0000) as f32 * VAL
+    (bits - 0x3F80_0000) as f64 * 7.17711438e-7_f64
 }
 
 /// Compute the envelope-mark vector for an entire stream.
