@@ -268,7 +268,6 @@ fn parity_ramp_stereo44() {
 }
 
 #[test]
-#[ignore = "stereo ramp parity not yet achieved — likely stereo coupling / ramp-specific psy"]
 fn oracle_parity_ramp_stereo44() {
     let n = 44100usize;
     let samples: Vec<i16> = (0..n * 2)

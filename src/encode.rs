@@ -838,18 +838,28 @@ pub(crate) fn encode_with_serial_and_meta(
     // A short block is IMPULSE if any envelope mark falls within centerW±bs/2.
     // centerW for envelope-mark space includes the LPC pre-extrap offset
     // (CENTER_W = 1024 samples).
+    // libvorbis decides IMPULSE vs PADDING for each short block via
+    // _ve_envelope_mark, which scans the envelope-mark buffer in a window
+    // around centerW. Our port's marks come out at slightly different
+    // step indices than libvorbis on tonal input due to 1-ULP differences
+    // in the _ve_amp trig/MDCT path, so we can't trust the scan for the
+    // very first short blocks in a stream where libvorbis's marks are
+    // more aggressive than ours. Heuristic: the head cluster of short
+    // blocks (before the first long block) is always IMPULSE; later
+    // short clusters use the regular envelope-mark scan, which empirically
+    // agrees with libvorbis for ramp's mid-stream wraparound.
+    let head_short_run = block_w.iter().take_while(|&&w| w == 0).count();
     let block_is_impulse: Vec<bool> = block_starts
         .iter()
         .zip(block_w.iter())
         .zip(block_curmarks.iter())
-        .map(|((&start, &w), &curmark)| {
+        .enumerate()
+        .map(|(idx, ((&start, &w), &curmark))| {
             if w != 0 {
-                false // long blocks don't use impulse/padding distinction
+                false
+            } else if idx < head_short_run {
+                true
             } else {
-                // centerW in env-marks space = audio block_start + LPC pre
-                // offset (CENTER_W). block_start is where current-half begins,
-                // which is the boundary between left and right halves =
-                // libvorbis centerW.
                 let center_w_in_env = (start + CENTER_W) as i64;
                 crate::envelope::short_is_impulse(&env_marks, curmark, center_w_in_env)
             }
@@ -1070,16 +1080,12 @@ pub(crate) fn encode_with_serial_and_meta(
         // envelope mark in its neighborhood; BLOCKTYPE_PADDING (psy[1])
         // otherwise. BLOCKTYPE_TRANSITION (psy[2]) when long block has !lW
         // or !nW; BLOCKTYPE_LONG (psy[3]) only when both lW and nW are long.
-        //
-        // The IMPULSE/PADDING distinction depends on envelope marks that
-        // require bit-precise _ve_amp output to match libvorbis. Since our
-        // port has 1-ULP precision deviations that shift mark positions,
-        // we use IMPULSE for now (matches libvorbis on sine/silence; gives
-        // slightly larger residue on ramp mid-stream short blocks).
-        let _ = block_is_impulse;
-        let _ = &psy_look_padding;
         let psy_look = if is_short {
-            &psy_look_short
+            if block_is_impulse[block_idx] {
+                &psy_look_short
+            } else {
+                &psy_look_padding
+            }
         } else if block_mode.prev_window && block_mode.next_window {
             &psy_look_long
         } else {
