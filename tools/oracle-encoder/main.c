@@ -20,7 +20,11 @@
 #include "vorbis/codec.h"
 #include "vorbis/vorbisenc.h"
 
-#define READ_CHUNK 1024
+/* Use 64-sample analysis chunk to match ffmpeg/lewtoff's pre-extrapolation
+ * trigger point (n_lpc=2112). Different chunk sizes give different
+ * libvorbis _preextrapolate_helper firing positions and therefore different
+ * LPC-predicted virtual samples in the first short block. */
+#define READ_CHUNK 64
 
 static void die(const char *msg) {
     fprintf(stderr, "oracle-encoder: %s\n", msg);
