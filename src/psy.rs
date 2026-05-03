@@ -1169,22 +1169,23 @@ pub fn vp_offset_and_mix(
         logmask[i] = val.max(tone[i] + toneatt);
 
         if offset_select == 1 {
-            // C: coeffi = -17.2 (double), 0.005, 0.0003 (double), 1.0 (double).
-            // val and cx are float; expression promotes to double; result cast
-            // to float when stored in mdct[i] *= de.
-            let coeffi: f64 = -17.2;
-            let val2 = val as f64 - logmdct[i] as f64;
-            let cx_f64 = cx as f64;
-
-            let de: f32 = if val2 > coeffi {
-                let d = 1.0 - (val2 - coeffi) * 0.005 * cx_f64;
+            // C: `float de, coeffi, cx; coeffi = -17.2;` — coeffi is float
+            // (= -17.20000076f, NOT the f64 literal -17.2 = -17.19999999...).
+            // Then `val = val - logmdct[i]` and `if(val > coeffi)` are both
+            // f32 operations. The math `1.0 - (val-coeffi)*0.005*cx` promotes
+            // to f64 only because 0.005/0.0003/1.0 are double literals; the
+            // final assignment to `float de` truncates back to f32.
+            let coeffi: f32 = -17.2;
+            let val_diff = val - logmdct[i];
+            let de: f32 = if val_diff > coeffi {
+                let d = 1.0_f64 - (val_diff - coeffi) as f64 * 0.005_f64 * cx as f64;
                 if d < 0.0 {
                     0.0001_f32
                 } else {
                     d as f32
                 }
             } else {
-                (1.0 - (val2 - coeffi) * 0.0003 * cx_f64) as f32
+                (1.0_f64 - (val_diff - coeffi) as f64 * 0.0003_f64 * cx as f64) as f32
             };
 
             mdct[i] *= de;
