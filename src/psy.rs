@@ -510,6 +510,10 @@ pub fn vp_psy_init(
             }
 
             p.bark[i] = ((lo - 1) << 16) + (hi - 1);
+
+            if (10..=30).contains(&i) && std::env::var("LW_DEBUG_BARK").is_ok() {
+                eprintln!("LW_BARK_INIT n={} i={}: lo={} hi={}", n, i, lo, hi);
+            }
         }
     }
 
@@ -862,6 +866,12 @@ fn bark_noise_hybridmp(n: usize, b: &[i64], f: &[f32], noise: &mut [f32], offset
         big_b = tn * txy - tx * ty;
         big_d = tn * txx - tx * tx;
         r = (big_a + x * big_b) / big_d;
+
+        if (12..=16).contains(&i) && std::env::var("LW_DEBUG_BNH").is_ok() {
+            eprintln!("LW_BNH i={} lo={} hi={} x={:.1} tn={:.6} tx={:.6} txx={:.6} ty={:.6} txy={:.6} A={:.6} B={:.6} D={:.6} R={:.6} noise={:.6} offset={:.6}",
+                i, lo, hi, x, tn, tx, txx, ty, txy, big_a, big_b, big_d, r, r - offset, offset);
+        }
+
         if r < 0.0 {
             r = 0.0;
         }

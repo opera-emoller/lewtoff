@@ -12,6 +12,7 @@
 #![allow(unused_mut)]
 
 use crate::bitpack::BitWriter;
+use crate::drft::{drft_forward_long, drft_forward_short};
 use crate::floor1::{floor1_encode, floor1_fit, Floor1State};
 use crate::mdct::{mdct_forward_long, mdct_forward_short};
 use crate::psy::{
@@ -90,6 +91,17 @@ pub(crate) fn mapping0_forward(
     // Per-channel local amplitude max
     let mut local_ampmax = vec![0.0f32; channels];
 
+    // Apply ampmax decay at the START of each block (port of block.c _vp_ampmax_decay call).
+    // libvorbis decays g->ampmax before calling mapping0_forward, using the CURRENT block's n2.
+    // This ensures that a long block (n2=1024) decays more than a short block (n2=128).
+    *ampmax = vp_ampmax_decay(*ampmax, gi, n2, psy_look.rate);
+
+    if std::env::var("LW_DEBUG_PCM").is_ok() {
+        for i in 0..channels {
+            let vals: Vec<String> = pcm_blocks[i].iter().map(|v| format!("{:.8}", v)).collect();
+            eprintln!("LW_WINDOWED_PCM ch={} n={}: [{}]", i, n, vals.join(","));
+        }
+    }
     // Apply window (already done by caller), MDCT, and compute log-FFT approx
     // Port of: lines 254-360 in mapping0.c
     for i in 0..channels {
@@ -112,30 +124,49 @@ pub(crate) fn mapping0_forward(
             gmdct[i].copy_from_slice(&out);
         }
 
-        // Log magnitude spectrum from the windowed PCM (FFT approximation).
-        // libvorbis calls drft_forward then logs. We approximate by using
-        // the magnitude of adjacent MDCT pairs (bins j and j+1 → logfft[j/2]).
-        // This is a simplification; Phase 9b may refine if needed.
-        // For the smoke test (silence), the exact values don't matter much.
-        //
-        // The C code does:
-        //   logfft[0] = scale_dB + todB(pcm) + .345
-        //   for j in 1..n-1 step 2:
+        // Compute log-magnitude spectrum via real FFT on the windowed PCM.
+        // Port of mapping0.c lines 308-337:
+        //   drft_forward(&b->fft_look[vb->W], pcm);
+        //   logfft[0] = scale_dB + todB(pcm) + .345;
+        //   for j=1; j<n-1; j+=2:
         //     temp = pcm[j]^2 + pcm[j+1]^2
-        //     logfft[(j+1)/2] = scale_dB + 0.5*todB(&temp) + .345
-        //     local_ampmax = max(local_ampmax, logfft[(j+1)/2])
-        //
-        // We approximate using MDCT output instead of FFT for simplicity.
-        // The MDCT provides a power spectrum that's adequate for masking.
-        let mut lam = scale_dB + to_db(gmdct[i][0].abs()) + 0.345_f32;
-        logfft[i][0] = lam;
-        local_ampmax[i] = lam;
-        for j in 1..n2 {
-            let v = gmdct[i][j];
-            let t = scale_dB + to_db(v.abs()) + 0.345_f32;
-            logfft[i][j] = t;
-            if t > local_ampmax[i] {
-                local_ampmax[i] = t;
+        //     logfft[(j+1)>>1] = scale_dB + 0.5*todB(&temp) + .345
+        //     local_ampmax[i] = max(...)
+        if block_mode.is_long {
+            let mut fft_buf = [0.0f32; LONG_BLOCK];
+            fft_buf.copy_from_slice(&pcm_blocks[i]);
+            drft_forward_long(&mut fft_buf);
+            // DC bin
+            let lam = scale_dB + to_db(fft_buf[0]) + 0.345_f32;
+            logfft[i][0] = lam;
+            local_ampmax[i] = lam;
+            // Bins 1..n/2
+            let mut j = 1usize;
+            while j < n - 1 {
+                let temp = fft_buf[j] * fft_buf[j] + fft_buf[j + 1] * fft_buf[j + 1];
+                let t = scale_dB + 0.5_f32 * to_db(temp) + 0.345_f32;
+                logfft[i][(j + 1) >> 1] = t;
+                if t > local_ampmax[i] {
+                    local_ampmax[i] = t;
+                }
+                j += 2;
+            }
+        } else {
+            let mut fft_buf = [0.0f32; SHORT_BLOCK];
+            fft_buf.copy_from_slice(&pcm_blocks[i]);
+            drft_forward_short(&mut fft_buf);
+            let lam = scale_dB + to_db(fft_buf[0]) + 0.345_f32;
+            logfft[i][0] = lam;
+            local_ampmax[i] = lam;
+            let mut j = 1usize;
+            while j < n - 1 {
+                let temp = fft_buf[j] * fft_buf[j] + fft_buf[j + 1] * fft_buf[j + 1];
+                let t = scale_dB + 0.5_f32 * to_db(temp) + 0.345_f32;
+                logfft[i][(j + 1) >> 1] = t;
+                if t > local_ampmax[i] {
+                    local_ampmax[i] = t;
+                }
+                j += 2;
             }
         }
         if local_ampmax[i] > 0.0 {
@@ -143,6 +174,16 @@ pub(crate) fn mapping0_forward(
         }
         if local_ampmax[i] > *ampmax {
             *ampmax = local_ampmax[i];
+        }
+        // DEBUG
+        if std::env::var("LW_DEBUG_FFT").is_ok() {
+            eprintln!(
+                "ch={} n={} local_ampmax={:.2} logfft[0..5]={:?}",
+                i,
+                n,
+                local_ampmax[i],
+                &logfft[i][..5.min(logfft[i].len())]
+            );
         }
     }
 
@@ -162,6 +203,16 @@ pub(crate) fn mapping0_forward(
             .iter()
             .map(|&v| to_db(v.abs()) + 0.345_f32)
             .collect();
+        if std::env::var("LW_DEBUG_MDCT_RAW").is_ok() {
+            for &b in &[14usize, 224, 265, 269, 273, 347, 490] {
+                if b < n2 {
+                    eprintln!(
+                        "LW_MDCT_RAW ch={} n={} bin={}: gmdct={:.10e} logmdct={:.4}",
+                        i, n, b, gmdct_work[i][b], logmdct[b]
+                    );
+                }
+            }
+        }
 
         let mut logmask = vec![0.0f32; n2];
 
@@ -177,6 +228,16 @@ pub(crate) fn mapping0_forward(
             local_ampmax[i],
         );
 
+        if std::env::var("LW_DEBUG_TONE").is_ok() {
+            let vals: Vec<String> = tone_bufs[i].iter().map(|v| format!("{:.6}", v)).collect();
+            eprintln!("LW_TONE: [{}]", vals.join(","));
+            let nvals: Vec<String> = noise_bufs[i].iter().map(|v| format!("{:.6}", v)).collect();
+            eprintln!("LW_NOISE: [{}]", nvals.join(","));
+        }
+        if std::env::var("LW_DEBUG_FULLNOISE").is_ok() {
+            let nvals: Vec<String> = noise_bufs[i].iter().map(|v| format!("{:.6}", v)).collect();
+            eprintln!("LW_BLOCK0_NOISE: [{}]", nvals.join(","));
+        }
         // Offset + mix (offset_select=1 = nominal, not bitrate managed)
         vp_offset_and_mix(
             psy_look,
@@ -190,10 +251,33 @@ pub(crate) fn mapping0_forward(
 
         // floor1_fit
         let floor_state = &floor_states[mapping.floorsubmap[submap]];
+        if std::env::var("LW_DEBUG_LOGMDCT").is_ok() {
+            let vals: Vec<String> = logmdct.iter().map(|v| format!("{:.6}", v)).collect();
+            eprintln!("LW_BLOCK0_LOGMDCT: [{}]", vals.join(","));
+            let mvals: Vec<String> = logmask.iter().map(|v| format!("{:.6}", v)).collect();
+            eprintln!("LW_BLOCK0_LOGMASK: [{}]", mvals.join(","));
+        }
+        if std::env::var("LW_DEBUG_PSY").is_ok() {
+            eprintln!(
+                "LW_LOGMASK ch={} n={} ampmax={:.2} [0..5]: {:.2} {:.2} {:.2} {:.2} {:.2}",
+                i, n, *ampmax, logmask[0], logmask[1], logmask[2], logmask[3], logmask[4]
+            );
+        }
         floor_posts[i] = floor1_fit(floor_state, &logmdct, &logmask);
+        if std::env::var("LW_DEBUG_FLOOR").is_ok() {
+            if let Some(ref posts) = floor_posts[i] {
+                eprintln!(
+                    "LW_FLOOR ch={} n={} ampmax={:.2} floor_posts={:?}",
+                    i, n, *ampmax, posts
+                );
+            } else {
+                eprintln!(
+                    "LW_FLOOR ch={} n={} ampmax={:.2} floor_posts=None",
+                    i, n, *ampmax
+                );
+            }
+        }
     }
-
-    *ampmax = vp_ampmax_decay(*ampmax, gi, n, psy_look.rate);
 
     // --- Encode the packet ---
     // Port of: lines 592-688 in mapping0.c
