@@ -36,6 +36,18 @@ pub fn lpc_from_data(data: &[f32], lpci: &mut [f32], n: usize, m: usize) -> f32 
         }
         eprintln!();
     }
+    // One-shot dump of the full f64 aut[] for layer-diff against libvorbis.
+    if std::env::var("LEWTOFF_DEBUG_DUMP").is_ok() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        static FIRED: AtomicBool = AtomicBool::new(false);
+        if !FIRED.swap(true, Ordering::Relaxed) {
+            let mut bytes = Vec::with_capacity((m + 1) * 8);
+            for v in aut.iter() {
+                bytes.extend_from_slice(&v.to_le_bytes());
+            }
+            let _ = std::fs::write("/tmp/lewtoff-debug/r_lpc_aut.bin", &bytes);
+        }
+    }
 
     // Generate LPC coefficients from autocorr values (Levinson-Durbin)
     let mut error = aut[0] * (1.0 + 1e-10);
@@ -84,6 +96,24 @@ pub fn lpc_from_data(data: &[f32], lpci: &mut [f32], n: usize, m: usize) -> f32 
         *out = val as f32;
     }
 
+    if std::env::var("LEWTOFF_DEBUG_DUMP").is_ok() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        static FIRED: AtomicBool = AtomicBool::new(false);
+        if !FIRED.swap(true, Ordering::Relaxed) {
+            let mut bytes = Vec::with_capacity(m * 8);
+            for v in lpc.iter() {
+                bytes.extend_from_slice(&v.to_le_bytes());
+            }
+            let _ = std::fs::write("/tmp/lewtoff-debug/r_lpc_coeffs.bin", &bytes);
+            // Also dump the f32 lpci (after cast)
+            let mut bytes32 = Vec::with_capacity(m * 4);
+            for v in lpci.iter() {
+                bytes32.extend_from_slice(&v.to_le_bytes());
+            }
+            let _ = std::fs::write("/tmp/lewtoff-debug/r_lpc_coeffs_f32.bin", &bytes32);
+        }
+    }
+
     error as f32
 }
 
@@ -102,10 +132,29 @@ pub fn lpc_predict(coeff: &[f32], prime: &[f32], m: usize, data: &mut [f32], n: 
         work[..m].copy_from_slice(&prime[..m]);
     }
 
-    // Port of libvorbis lib/lpc.c::vorbis_lpc_predict:
+    if std::env::var("LEWTOFF_DEBUG_DUMP").is_ok() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        static FIRED: AtomicBool = AtomicBool::new(false);
+        if !FIRED.swap(true, Ordering::Relaxed) {
+            // dump prime input + coeff input
+            let mut p = Vec::new();
+            for v in prime.iter() {
+                p.extend_from_slice(&v.to_le_bytes());
+            }
+            let _ = std::fs::write("/tmp/lewtoff-debug/r_lpc_predict_prime.bin", &p);
+            let mut c = Vec::new();
+            for v in coeff.iter() {
+                c.extend_from_slice(&v.to_le_bytes());
+            }
+            let _ = std::fs::write("/tmp/lewtoff-debug/r_lpc_predict_coeff.bin", &c);
+        }
+    }
+
+    // Port of libvorbis lib/lpc.c::vorbis_lpc_predict.
     //   o=i; p=m;
     //   for(j=0;j<m;j++) y-=work[o++]*coeff[--p];
-    // coeff is read REVERSED while work is read FORWARD. Mirror that.
+    // No FMA — matches the C source semantics exactly (separate mul + sub).
+    // Tests against the no-FMA C debug harness pass byte-identically.
     for i in 0..n {
         let mut y = 0.0f32;
         for (o, p) in (i..i + m).zip((0..m).rev()) {
@@ -113,6 +162,18 @@ pub fn lpc_predict(coeff: &[f32], prime: &[f32], m: usize, data: &mut [f32], n: 
         }
         data[i] = y;
         work[m + i] = y;
+    }
+
+    if std::env::var("LEWTOFF_DEBUG_DUMP").is_ok() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        static FIRED: AtomicBool = AtomicBool::new(false);
+        if !FIRED.swap(true, Ordering::Relaxed) {
+            let mut bytes = Vec::with_capacity(n * 4);
+            for v in data.iter() {
+                bytes.extend_from_slice(&v.to_le_bytes());
+            }
+            let _ = std::fs::write("/tmp/lewtoff-debug/r_lpc_predict_out.bin", &bytes);
+        }
     }
 }
 

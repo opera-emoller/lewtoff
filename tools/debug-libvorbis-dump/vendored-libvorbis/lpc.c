@@ -42,6 +42,7 @@ Carsten Bormann
 
 *********************************************************************/
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -70,6 +71,16 @@ float vorbis_lpc_from_data(float *data,float *lpci,int n,int m){
     double d=0; /* double needed for accumulator depth */
     for(i=j;i<n;i++)d+=(double)data[i]*data[i-j];
     aut[j]=d;
+  }
+  /* One-shot dump of aut[] on first call. */
+  {
+    static int fired = 0;
+    if (!fired) {
+      fired = 1;
+      FILE *f = fopen("/tmp/lewtoff-debug/c_lpc_aut.bin", "wb");
+      if (f) { fwrite(aut, sizeof(double), m+1, f); fclose(f); }
+      fprintf(stderr, "C_LPC: aut dumped (m=%d, n=%d)\n", m, n);
+    }
   }
 
   /* Generate lpc coefficients from autocorr values */
@@ -123,6 +134,18 @@ float vorbis_lpc_from_data(float *data,float *lpci,int n,int m){
 
   for(j=0;j<m;j++)lpci[j]=(float)lpc[j];
 
+  /* One-shot dump of lpc[] coefficients on first call. */
+  {
+    static int fired = 0;
+    if (!fired) {
+      fired = 1;
+      FILE *f = fopen("/tmp/lewtoff-debug/c_lpc_coeffs.bin", "wb");
+      if (f) { fwrite(lpc, sizeof(double), m, f); fclose(f); }
+      FILE *f2 = fopen("/tmp/lewtoff-debug/c_lpc_coeffs_f32.bin", "wb");
+      if (f2) { fwrite(lpci, sizeof(float), m, f2); fclose(f2); }
+    }
+  }
+
   /* we need the error value to know how big an impulse to hit the
      filter with later */
 
@@ -147,6 +170,18 @@ void vorbis_lpc_predict(float *coeff,float *prime,int m,
     for(i=0;i<m;i++)
       work[i]=prime[i];
 
+  /* One-shot dump of prime+coeff inputs to lpc_predict on first call. */
+  {
+    static int fired = 0;
+    if (!fired) {
+      fired = 1;
+      FILE *f = fopen("/tmp/lewtoff-debug/c_lpc_predict_prime.bin", "wb");
+      if (f) { fwrite(prime, sizeof(float), m, f); fclose(f); }
+      FILE *f2 = fopen("/tmp/lewtoff-debug/c_lpc_predict_coeff.bin", "wb");
+      if (f2) { fwrite(coeff, sizeof(float), m, f2); fclose(f2); }
+    }
+  }
+
   for(i=0;i<n;i++){
     y=0;
     o=i;
@@ -155,5 +190,15 @@ void vorbis_lpc_predict(float *coeff,float *prime,int m,
       y-=work[o++]*coeff[--p];
 
     data[i]=work[o]=y;
+  }
+
+  /* One-shot dump of predict output on first call. */
+  {
+    static int dumped_out = 0;
+    if (!dumped_out) {
+      dumped_out = 1;
+      FILE *f = fopen("/tmp/lewtoff-debug/c_lpc_predict_out.bin", "wb");
+      if (f) { fwrite(data, sizeof(float), n, f); fclose(f); }
+    }
   }
 }

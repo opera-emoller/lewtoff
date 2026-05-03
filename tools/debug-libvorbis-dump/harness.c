@@ -78,8 +78,15 @@ int main(void) {
 
             float **pcm = vorbis_analysis_buffer(&vd, this_chunk);
             for (int i = 0; i < this_chunk; i++) {
-                double v = sin(2.0 * M_PI * 440.0 * (fed + i) / (double)RATE);
-                int16_t s = (int16_t)(v * 16384.0);  /* truncate like Rust 'as i16' */
+                /* Match Rust parity test EXACTLY:
+                 *   let t = i as f32 / rate as f32;     // division FIRST
+                 *   let v = f32::sin(2.0 * PI * freq * t);
+                 *   let s = (v * 16384.0) as i16;
+                 *   let pcm = s as f32 / 32768.0;
+                 */
+                float t = (float)(fed + i) / (float)RATE;
+                float v = sinf(2.0f * (float)M_PI * 440.0f * t);
+                int16_t s = (int16_t)(v * 16384.0f);
                 pcm[0][i] = s / 32768.0f;
             }
             vorbis_analysis_wrote(&vd, this_chunk);
