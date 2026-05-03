@@ -202,3 +202,13 @@ void vorbis_lpc_predict(float *coeff,float *prime,int m,
     }
   }
 }
+
+/* Debug hook: dump drftf1 input on first call. */
+extern int g_drftf1_dumped;
+int g_drftf1_dumped = 0;
+void debug_dump_drftf1_in(int n, float *c) {
+  if (g_drftf1_dumped) return;
+  g_drftf1_dumped = 1;
+  FILE *f = fopen("/tmp/lewtoff-debug/c_drftf1_in.bin", "wb");
+  if (f) { fwrite(c, sizeof(float), n, f); fclose(f); }
+}

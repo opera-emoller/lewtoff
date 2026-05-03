@@ -1,5 +1,4 @@
 // AUTO-GENERATED. Window values byte-identical to libvorbis 1.3.7 vwin256/vwin2048.
-// Source: ~/Documents/src/libvorbis/lib/window.c (parsed C float literals).
 #![allow(clippy::excessive_precision)]
 
 pub static SIN_WINDOW_2048: [f32; 2048] = [

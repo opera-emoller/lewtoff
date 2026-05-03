@@ -27,6 +27,7 @@
  * FORTRAN version
  */
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -569,10 +570,22 @@ L119:
   }
 }
 
+extern void debug_dump_drftf1_in(int n, float *c);
 static void drftf1(int n,float *c,float *ch,float *wa,int *ifac){
   int i,k1,l1,l2;
   int na,kh,nf;
   int ip,iw,ido,idl1,ix2,ix3;
+  debug_dump_drftf1_in(n, c);
+
+  /* dump wa (trigcache used by drftf1) for first call */
+  {
+    static int wadumped = 0;
+    if (!wadumped) {
+      wadumped = 1;
+      FILE *f = fopen("/tmp/lewtoff-debug/c_drftf1_wa.bin", "wb");
+      if (f) { fwrite(wa, sizeof(float), 2*n, f); fclose(f); }
+    }
+  }
 
   nf=ifac[1];
   na=1;
@@ -596,6 +609,20 @@ static void drftf1(int n,float *c,float *ch,float *wa,int *ifac){
       dradf4(ido,l1,ch,c,wa+iw-1,wa+ix2-1,wa+ix3-1);
     else
       dradf4(ido,l1,c,ch,wa+iw-1,wa+ix2-1,wa+ix3-1);
+    {
+      static int iter = 0;
+      if (iter < 4) {
+        char path[128];
+        snprintf(path, sizeof(path), "/tmp/lewtoff-debug/c_drftf1_iter%d_out.bin", iter);
+        FILE *f = fopen(path, "wb");
+        if (f) {
+          float *buf = (na != 0) ? c : ch;
+          fwrite(buf, sizeof(float), n, f);
+          fclose(f);
+        }
+        iter++;
+      }
+    }
     goto L110;
 
  L102:

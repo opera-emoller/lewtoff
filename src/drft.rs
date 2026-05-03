@@ -92,9 +92,11 @@ fn dradf4(
     wa2: &[f32],
     wa3: &[f32],
 ) {
-    // 0.70710678118654752 as f32 = 7.071068e-1, exact hex 0x3f3504f3
+    // libvorbis: static const float hsqt2 = .70710678118654752f;
+    // 17 sig digits round-trip to f32 bits 0x3f3504f3 (Rust's `7.0710678e-1` does too).
+    // The shorter `7.071068e-1` rounds to 0x3f3504f4 (1 ULP off), which is wrong.
     #[allow(clippy::approx_constant)]
-    const HSQT2: f32 = 7.071_068e-1_f32;
+    const HSQT2: f32 = 7.0710678e-1_f32;
     let t0 = l1 * ido;
 
     // DC butterfly
@@ -208,6 +210,25 @@ fn drftf1(n: usize, c: &mut [f32], ch: &mut [f32], wa: &[f32], ifac: &[i32]) {
     let mut l2 = n;
     let mut iw = n;
 
+    // Debug dump: input to drftf1 (first call only).
+    if std::env::var("LEWTOFF_DEBUG_DUMP").is_ok() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        static FIRED: AtomicBool = AtomicBool::new(false);
+        if !FIRED.swap(true, Ordering::Relaxed) {
+            let mut bytes = Vec::with_capacity(n * 4);
+            for v in c.iter() {
+                bytes.extend_from_slice(&v.to_le_bytes());
+            }
+            let _ = std::fs::write("/tmp/lewtoff-debug/r_drftf1_in.bin", &bytes);
+
+            let mut wabytes = Vec::with_capacity(2 * n * 4);
+            for v in wa.iter().take(2 * n) {
+                wabytes.extend_from_slice(&v.to_le_bytes());
+            }
+            let _ = std::fs::write("/tmp/lewtoff-debug/r_drftf1_wa.bin", &wabytes);
+        }
+    }
+
     for k1 in 0..nf {
         let kh = nf - k1;
         let ip = ifac[kh + 1] as usize;
@@ -239,6 +260,22 @@ fn drftf1(n: usize, c: &mut [f32], ch: &mut [f32], wa: &[f32], ifac: &[i32]) {
                     &wa[ix2 - 1..],
                     &wa[ix3 - 1..],
                 );
+            }
+            if std::env::var("LEWTOFF_DEBUG_DUMP").is_ok() {
+                use std::sync::atomic::{AtomicUsize, Ordering};
+                static ITER: AtomicUsize = AtomicUsize::new(0);
+                let iter = ITER.fetch_add(1, Ordering::Relaxed);
+                if iter < 4 {
+                    let buf = if na != 0 { &c[..] } else { &ch[..] };
+                    let mut bytes = Vec::with_capacity(buf.len() * 4);
+                    for v in buf {
+                        bytes.extend_from_slice(&v.to_le_bytes());
+                    }
+                    let _ = std::fs::write(
+                        format!("/tmp/lewtoff-debug/r_drftf1_iter{iter}_out.bin"),
+                        &bytes,
+                    );
+                }
             }
         } else if ip == 2 {
             if na != 0 {
