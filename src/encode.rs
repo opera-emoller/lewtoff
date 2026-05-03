@@ -266,7 +266,7 @@ pub(crate) fn encode_with_serial(
     {
         let mut w = BitWriter::new();
         write_comment_header(&mut w);
-        ogg.write_packet(&w.into_bytes(), 0, false, true);
+        ogg.write_packet(&w.into_bytes(), 0, false, false);
     }
     {
         let mut w = BitWriter::new();
