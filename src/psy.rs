@@ -578,7 +578,9 @@ pub fn vp_psy_init(
 
     // noise offsets
     for i in 0..n {
-        let mut halfoc = to_oc((i as f32 + 0.5) * rate as f32 / (2.0 * n as f32)) * 2.0;
+        // C: float halfoc=toOC((i+.5)*rate/(2.*n))*2.;
+        // The argument to toOC is f64 (literals .5, 2. are double); cast at fn boundary.
+        let mut halfoc = to_oc(((i as f64 + 0.5) * rate as f64 / (2.0 * n as f64)) as f32) * 2.0;
         if halfoc < 0.0 {
             halfoc = 0.0;
         }
@@ -591,9 +593,12 @@ pub fn vp_psy_init(
         }
         let del = halfoc - inthalfoc as f32;
 
+        // C: noiseoff[j][i] = a*(1.-del) + b*del; all in double, cast to float.
         for j in 0..P_NOISECURVES {
-            p.noiseoffset[j][i] =
-                vi.noiseoff[j][inthalfoc] * (1.0 - del) + vi.noiseoff[j][inthalfoc + 1] * del;
+            let a = vi.noiseoff[j][inthalfoc] as f64;
+            let b = vi.noiseoff[j][inthalfoc + 1] as f64;
+            let d = del as f64;
+            p.noiseoffset[j][i] = (a * (1.0 - d) + b * d) as f32;
         }
     }
 

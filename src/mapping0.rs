@@ -262,6 +262,11 @@ pub(crate) fn mapping0_forward(
                     tbytes.extend_from_slice(&v.to_le_bytes());
                 }
                 let _ = std::fs::write("/tmp/lewtoff-debug/r_tone.bin", &tbytes);
+                let mut obytes = Vec::new();
+                for v in psy_look.noiseoffset[1].iter() {
+                    obytes.extend_from_slice(&v.to_le_bytes());
+                }
+                let _ = std::fs::write("/tmp/lewtoff-debug/r_noiseoffset_1.bin", &obytes);
             }
         }
         // Offset + mix (offset_select=1 = nominal, not bitrate managed)

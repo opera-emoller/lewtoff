@@ -418,6 +418,7 @@ void _vp_psy_init(vorbis_look_psy *p,vorbis_info_psy *vi,
             fwrite(p->tonecurves[b][lv], sizeof(float), EHMER_MAX+2, fff);
         fclose(fff);
       }
+      /* noiseoffset[1] is dumped later, after it's populated */
     }
   }
 
@@ -458,6 +459,15 @@ void _vp_psy_init(vorbis_look_psy *p,vorbis_info_psy *vi,
 
     if(i==0){
       fprintf(stderr,"PSY_INIT_DEBUG: noiseoffset[1][0]=%.6f\n", p->noiseoffset[1][0]);
+    }
+  }
+  /* dump noiseoffset[1] for layer-diff */
+  {
+    static int ndumped=0;
+    if(!ndumped){
+      ndumped=1;
+      FILE *fno=fopen("/tmp/lewtoff-debug/c_noiseoffset_1.bin","wb");
+      if(fno){ fwrite(p->noiseoffset[1], sizeof(float), n, fno); fclose(fno); }
     }
   }
 #if 0
