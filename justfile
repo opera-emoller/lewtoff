@@ -91,5 +91,42 @@ regen-mdct-vectors:
 wasm-test:
     wasm-pack test --node
 
+debug-dump-c:
+    #!/usr/bin/env bash
+    set -e
+    TOOL=tools/debug-libvorbis-dump
+    /usr/bin/clang -O0 -g -std=c11 \
+      -I$TOOL/vendored-libvorbis \
+      -I$TOOL/vendored-libvorbis/include \
+      -I/opt/homebrew/include \
+      $TOOL/harness.c \
+      $TOOL/vendored-libvorbis/debug_dump.c \
+      $TOOL/vendored-libvorbis/analysis.c \
+      $TOOL/vendored-libvorbis/bitrate.c \
+      $TOOL/vendored-libvorbis/block.c \
+      $TOOL/vendored-libvorbis/codebook.c \
+      $TOOL/vendored-libvorbis/envelope.c \
+      $TOOL/vendored-libvorbis/floor0.c \
+      $TOOL/vendored-libvorbis/floor1.c \
+      $TOOL/vendored-libvorbis/info.c \
+      $TOOL/vendored-libvorbis/lookup.c \
+      $TOOL/vendored-libvorbis/lpc.c \
+      $TOOL/vendored-libvorbis/lsp.c \
+      $TOOL/vendored-libvorbis/mapping0.c \
+      $TOOL/vendored-libvorbis/mdct.c \
+      $TOOL/vendored-libvorbis/misc.c \
+      $TOOL/vendored-libvorbis/psy.c \
+      $TOOL/vendored-libvorbis/registry.c \
+      $TOOL/vendored-libvorbis/res0.c \
+      $TOOL/vendored-libvorbis/sharedbook.c \
+      $TOOL/vendored-libvorbis/smallft.c \
+      $TOOL/vendored-libvorbis/synthesis.c \
+      $TOOL/vendored-libvorbis/vorbisenc.c \
+      $TOOL/vendored-libvorbis/window.c \
+      -L/opt/homebrew/lib -logg -lm \
+      -o $TOOL/harness
+    $TOOL/harness
+    echo "dumps in /tmp/lewtoff-debug/c_*"
+
 clean:
     cargo clean
