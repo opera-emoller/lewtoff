@@ -780,8 +780,13 @@ fn fit_line(a: &[LsfitAcc], fits: usize, y0: &mut i32, y1: &mut i32, info: &Floo
     let x1 = a[fits - 1].x1;
 
     for i in 0..fits {
-        let weight =
-            (a[i].bn + a[i].an) as f64 * info.twofitweight as f64 / (a[i].an + 1) as f64 + 1.0_f64;
+        // libvorbis: `double weight = (a[i].bn+a[i].an) * info->twofitweight
+        //   / (a[i].an+1) + 1.;`
+        // info->twofitweight is float, so the int*float multiplication and the
+        // float/int division both happen in f32. Only the final +1. promotes
+        // the result to f64. Mirror that ordering exactly.
+        let weight_f32 = (a[i].bn + a[i].an) as f32 * info.twofitweight / (a[i].an + 1) as f32;
+        let weight = weight_f32 as f64 + 1.0_f64;
 
         xb += a[i].xb as f64 + a[i].xa as f64 * weight;
         yb += a[i].yb as f64 + a[i].ya as f64 * weight;
@@ -1232,9 +1237,10 @@ pub(crate) fn floor1_encode(
         }
 
         if std::env::var("LW_DEBUG_FLOOR_PART").is_ok() {
-            use std::sync::atomic::{AtomicBool, Ordering};
-            static FIRED: AtomicBool = AtomicBool::new(false);
-            if !FIRED.swap(true, Ordering::Relaxed) {
+            use std::sync::atomic::{AtomicUsize, Ordering};
+            static FIRED: AtomicUsize = AtomicUsize::new(0);
+            let n = FIRED.fetch_add(1, Ordering::Relaxed);
+            if n < 10 {
                 let mut s = format!("R_FLOOR_OUT posts={}:", posts);
                 for z in 0..posts as usize {
                     s.push_str(&format!(" {}", out[z]));
@@ -1275,7 +1281,7 @@ pub(crate) fn floor1_encode(
                 use std::sync::atomic::{AtomicUsize, Ordering};
                 static N: AtomicUsize = AtomicUsize::new(0);
                 let n = N.fetch_add(1, Ordering::Relaxed);
-                if n < 10 {
+                if n < 200 {
                     eprintln!(
                         "R_FLOOR_PART i={} class={} cdim={} csubbits={}",
                         i, class, cdim, csubbits
@@ -1309,7 +1315,7 @@ pub(crate) fn floor1_encode(
                     use std::sync::atomic::{AtomicUsize, Ordering};
                     static N: AtomicUsize = AtomicUsize::new(0);
                     let n = N.fetch_add(1, Ordering::Relaxed);
-                    if n < 8 {
+                    if n < 200 {
                         eprintln!(
                             "R_FLOOR_CVAL i={} class={} cval={} class_book={}",
                             i, class, cval, info.class_book[class]
@@ -1330,7 +1336,7 @@ pub(crate) fn floor1_encode(
                         use std::sync::atomic::{AtomicUsize, Ordering};
                         static N: AtomicUsize = AtomicUsize::new(0);
                         let n = N.fetch_add(1, Ordering::Relaxed);
-                        if n < 20 {
+                        if n < 400 {
                             eprintln!(
                                 "R_FLOOR_POSTV i={} k={} cdim={} j+k={} out={} book={} entries={}",
                                 i,
