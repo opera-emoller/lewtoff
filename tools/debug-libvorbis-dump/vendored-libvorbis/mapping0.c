@@ -499,7 +499,12 @@ static int mapping0_forward(vorbis_block *vb){
         if(fp){ fwrite(noise, sizeof(float), n/2, fp); fclose(fp); }
       }
       /* DEBUG: dump psy data for first block */
-      if((vb->sequence<=5 || vb->sequence==35) && i==0){
+      static long g_dump_seq = -2;
+      if (g_dump_seq == -2) {
+        char *e = getenv("LV_DUMP_SEQ");
+        g_dump_seq = e ? atol(e) : -1;
+      }
+      if((vb->sequence<=5 || vb->sequence==35 || vb->sequence==g_dump_seq) && i==0){
         int dbgj;
         fprintf(stderr,"LV_ATH_seq%lld_bin0: ath0=%.6f att=%.6f tone_init=%.6f ampmax=%.6f\n",
           (long long)vb->sequence, psy_look->ath[0], local_ampmax[i]+psy_look->vi->ath_adjatt,
