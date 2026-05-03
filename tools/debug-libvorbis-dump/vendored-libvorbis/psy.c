@@ -372,6 +372,35 @@ void _vp_psy_init(vorbis_look_psy *p,vorbis_info_psy *vi,
       fprintf(stderr, "C_NOISEOFF[1][0..16]=");
       for(int z=0;z<17;z++) fprintf(stderr, "0x%08x ", *(uint32_t*)&vi->noiseoff[1][z]);
       fprintf(stderr, "\n");
+      /* Dump ALL psy info as raw bytes so Rust can mirror exactly. */
+      FILE *fpsi = fopen("/tmp/lewtoff-debug/c_psy_info.bin", "wb");
+      if(fpsi) {
+        fwrite(&vi->blockflag, sizeof(int), 1, fpsi);
+        fwrite(&vi->ath_adjatt, sizeof(float), 1, fpsi);
+        fwrite(&vi->ath_maxatt, sizeof(float), 1, fpsi);
+        fwrite(vi->tone_masteratt, sizeof(float), 3, fpsi);
+        fwrite(&vi->tone_centerboost, sizeof(float), 1, fpsi);
+        fwrite(&vi->tone_decay, sizeof(float), 1, fpsi);
+        fwrite(&vi->tone_abs_limit, sizeof(float), 1, fpsi);
+        fwrite(vi->toneatt, sizeof(float), 17, fpsi);
+        fwrite(&vi->noisemaskp, sizeof(int), 1, fpsi);
+        fwrite(&vi->noisemaxsupp, sizeof(float), 1, fpsi);
+        fwrite(&vi->noisewindowlo, sizeof(float), 1, fpsi);
+        fwrite(&vi->noisewindowhi, sizeof(float), 1, fpsi);
+        fwrite(&vi->noisewindowlomin, sizeof(int), 1, fpsi);
+        fwrite(&vi->noisewindowhimin, sizeof(int), 1, fpsi);
+        fwrite(&vi->noisewindowfixed, sizeof(int), 1, fpsi);
+        fwrite(vi->noiseoff[0], sizeof(float), 17, fpsi);
+        fwrite(vi->noiseoff[1], sizeof(float), 17, fpsi);
+        fwrite(vi->noiseoff[2], sizeof(float), 17, fpsi);
+        fwrite(vi->noisecompand, sizeof(float), 40, fpsi);
+        fwrite(&vi->max_curve_dB, sizeof(float), 1, fpsi);
+        fwrite(&vi->normal_p, sizeof(int), 1, fpsi);
+        fwrite(&vi->normal_start, sizeof(int), 1, fpsi);
+        fwrite(&vi->normal_partition, sizeof(int), 1, fpsi);
+        fwrite(&vi->normal_thresh, sizeof(double), 1, fpsi);
+        fclose(fpsi);
+      }
     }
   }
   p->tonecurves=setup_tone_curves(vi->toneatt,rate*.5/n,n,

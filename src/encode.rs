@@ -269,17 +269,49 @@ fn make_q5_psy_impulse(rate: i64) -> VorbisInfoPsy {
     // raw curve 0: {-20,-20,-20,-20,-20,-18,-14,-10,-4,0,0,0,0,4,4,6,11}, min=-14
     // raw curve 1: {-32,-32,-32,-32,-28,-24,-22,-16,-10,-6,-8,-8,-6,-6,-6,-4,-2}, min=-26
     // raw curve 2: {-34,-34,-34,-34,-30,-26,-24,-18,-14,-12,-12,-12,-12,-12,-10,-9,-5}, min=-28
+    // Post-interpolation values from C dump (q=0.5+ε, ds≈1e-6).
+    // Integer values are exact f32; the fractional ones come from interp.
     let noiseoff_0: [f32; P_BANDS] = [
         -14.0, -14.0, -14.0, -14.0, -14.0, -14.0, -14.0, -10.0, -4.0, 0.0, 0.0, 0.0, 0.0, 4.0, 4.0,
         6.0, 11.0,
     ];
     let noiseoff_1: [f32; P_BANDS] = [
-        -26.0, -26.0, -26.0, -26.0, -26.0, -24.0, -22.0, -16.0, -10.0, -6.0, -8.0, -8.0, -6.0,
-        -6.0, -6.0, -4.0, -2.0,
+        -26.0,
+        -26.0,
+        -26.0,
+        -26.0,
+        -26.0,
+        f32::from_bits(0xc1c00003),
+        f32::from_bits(0xc1b00004),
+        f32::from_bits(0xc1800004),
+        f32::from_bits(0xc1200006),
+        f32::from_bits(0xc0c00014),
+        f32::from_bits(0xc1000008),
+        f32::from_bits(0xc1000008),
+        f32::from_bits(0xc0c00014),
+        f32::from_bits(0xc0c00014),
+        f32::from_bits(0xc0c00010),
+        f32::from_bits(0xc0800014),
+        f32::from_bits(0xc0000028),
     ];
     let noiseoff_2: [f32; P_BANDS] = [
-        -28.0, -28.0, -28.0, -28.0, -28.0, -26.0, -24.0, -18.0, -14.0, -12.0, -12.0, -12.0, -12.0,
-        -12.0, -10.0, -9.0, -5.0,
+        -28.0,
+        -28.0,
+        -28.0,
+        -28.0,
+        -28.0,
+        f32::from_bits(0xc1d00004),
+        f32::from_bits(0xc1c00002),
+        f32::from_bits(0xc1900003),
+        f32::from_bits(0xc1600006),
+        f32::from_bits(0xc1400008),
+        f32::from_bits(0xc1400008),
+        f32::from_bits(0xc1400008),
+        f32::from_bits(0xc1400008),
+        f32::from_bits(0xc1400008),
+        f32::from_bits(0xc120000a),
+        f32::from_bits(0xc1100009),
+        f32::from_bits(0xc0a00016),
     ];
     vi.noiseoff[0] = noiseoff_0;
     vi.noiseoff[1] = noiseoff_1;
