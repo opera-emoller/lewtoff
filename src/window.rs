@@ -101,13 +101,30 @@ impl WindowingBuffer {
         }
     }
 
+    /// Set the pre-stream extrapolated samples for the short block's left half.
+    /// `prestream[i]` = virtual sample at -(i+1) (index 0 = sample just before stream start).
+    /// These are placed in `prev_short` in reversed order:
+    /// `prev_short[SHORT_HALF - 1 - i] = prestream[i]`
+    /// so that `prev_short[SHORT_HALF-1]` = sample at -1 (closest to stream start).
+    pub(crate) fn set_prestream(&mut self, prestream: &[f32]) {
+        let len = prestream.len().min(SHORT_HALF);
+        for i in 0..len {
+            self.prev_short[SHORT_HALF - 1 - i] = prestream[i];
+        }
+    }
+
     /// Produce a windowed long (2048-sample) block.
     ///
     /// `current` is the next LONG_HALF = 1024 PCM samples.
+    /// `pre_current`: for the short→long transition (lw=false), the 448 PCM samples
+    ///   immediately preceding `current` in the stream. These fill the un-windowed
+    ///   middle section `[leftend..LONG_HALF]` = `[576..1024]` of the analysis frame,
+    ///   matching libvorbis's continuous PCM buffer. Pass `None` for long→long transitions.
     /// `nw_is_long`: is the next block long?
     pub(crate) fn push_long_block(
         &mut self,
         current: &[f32; LONG_HALF],
+        pre_current: Option<&[f32]>,
         nw_is_long: bool,
     ) -> [f32; LONG_BLOCK] {
         let lw = self.prev_is_long;
@@ -117,14 +134,22 @@ impl WindowingBuffer {
             // prev was long: copy prev_long into left half
             out[..LONG_HALF].copy_from_slice(&self.prev_long);
         } else {
-            // prev was short: center the short overlap in the left half
+            // prev was short: center the short overlap in the left half.
             // leftbegin = 2048/4 - 256/4 = 512 - 64 = 448
-            // leftend = 448 + 128 = 576
-            // The overlap region from the short block occupies [448..576]
-            let leftbegin = LONG_BLOCK / 4 - SHORT_BLOCK / 4;
-            let leftend = leftbegin + SHORT_HALF;
+            // leftend   = 448 + 128 = 576
+            // The overlap region from the short block occupies [448..576].
+            let leftbegin = LONG_BLOCK / 4 - SHORT_BLOCK / 4; // 448
+            let leftend = leftbegin + SHORT_HALF; // 576
             out[leftbegin..leftend].copy_from_slice(&self.prev_short);
-            // Samples [0..448] and [576..1024] remain 0 (already zero-initialized)
+            // The region [576..1024] is NOT zeroed by the Vorbis window function;
+            // libvorbis's continuous PCM buffer has real samples there.
+            // Fill it from `pre_current` (the 448 samples before `current`).
+            if let Some(pre) = pre_current {
+                let mid_len = LONG_HALF - leftend; // 448
+                let fill_len = pre.len().min(mid_len);
+                out[leftend..leftend + fill_len].copy_from_slice(&pre[..fill_len]);
+            }
+            // Samples [0..leftbegin] remain 0 (zeroed by window anyway).
         }
 
         // Right half: current samples
@@ -162,7 +187,7 @@ impl WindowingBuffer {
 
     #[cfg(test)]
     pub(crate) fn push_block(&mut self, current: &[f32; HALF_BLOCK]) -> [f32; BLOCK_SIZE] {
-        self.push_long_block(current, true)
+        self.push_long_block(current, None, true)
     }
 }
 

@@ -109,7 +109,11 @@ impl From<crate::residue::ResidueError> for SetupError {
 // unpack_q5_setup: parse the full setup blob
 // ---------------------------------------------------------------------------
 
-pub(crate) fn unpack_q5_setup(blob: &[u8], channels: usize) -> Result<Q5Setup, SetupError> {
+pub(crate) fn unpack_q5_setup(
+    blob: &[u8],
+    channels: usize,
+    rate_hz: u32,
+) -> Result<Q5Setup, SetupError> {
     if blob.len() < 7 || &blob[0..7] != b"\x05vorbis" {
         return Err(SetupError::BadMagic);
     }
@@ -137,16 +141,36 @@ pub(crate) fn unpack_q5_setup(blob: &[u8], channels: usize) -> Result<Q5Setup, S
             return Err(SetupError::BadBitstream);
         }
         let mut setup = unpack_floor1(&mut r, books_count)?;
-        // Wire up Floor1Setup encode-side fields for Q5 long block (n=2048).
-        // Values from libvorbis lib/modes/floor_all.h, floor template #8 (2048x27):
-        //   maxover=60, maxunder=30, maxerr=500, twofitweight=3, twofitatten=18, n=2048
+        // Wire up Floor1Setup encode-side fields.
+        // Values from libvorbis lib/modes/floor_all.h:
+        //   floor[5] (128x17): maxover=60, maxunder=30, maxerr=500, twofitweight=1, twofitatten=18
+        //   floor[7] (1024x27): maxover=60, maxunder=30, maxerr=500, twofitweight=3, twofitatten=18
         setup.maxover = 60.0;
         setup.maxunder = 30.0;
         setup.maxerr = 500.0;
-        setup.twofitweight = 3.0;
+        // n is the lowpass-limited bin count for this floor.
+        // libvorbis sets f->n = freq/nyq*blocksize where freq=lowpass_kHz*1000,
+        // nyq=rate/2, blocksize=blocksizes[block]/2.
+        // For Q5 at 44100 Hz: lowpass=18.9 kHz, nyq=22050.
+        //   short floor (postlist[1]=128):  18900/22050*128 = 109
+        //   long floor  (postlist[1]=1024): 18900/22050*1024 = 877
+        let postlist1 = setup.postlist[1];
+        let nyq = (rate_hz as f64) / 2.0;
+        let lowpass_hz = 18900.0_f64;
+        setup.n = ((lowpass_hz / nyq) * postlist1 as f64) as i32;
+        // twofitweight: 1 for short floors, 3 for long floors
+        setup.twofitweight = if postlist1 == 128 { 1.0 } else { 3.0 };
         setup.twofitatten = 18.0;
-        setup.n = setup.postlist[1]; // n = the block half-size for this floor
+        if std::env::var("LW_DEBUG_SETUP").is_ok() {
+            eprintln!(
+                "  floor: n={} postlist[1]={} partitions={}",
+                setup.n, setup.postlist[1], setup.partitions
+            );
+        }
         floor_setups.push(setup);
+    }
+    if std::env::var("LW_DEBUG_SETUP").is_ok() {
+        eprintln!("floors_count={}", floors_count);
     }
 
     // Build floor states (look structs)
@@ -191,8 +215,14 @@ pub(crate) fn unpack_q5_setup(blob: &[u8], channels: usize) -> Result<Q5Setup, S
         if windowtype != 0 || transformtype != 0 {
             return Err(SetupError::BadModeWindowtype);
         }
-        let mapping = r.read(8) as usize;
-        modes.push(Mode { blockflag, mapping });
+        let mapping_idx = r.read(8) as usize;
+        if std::env::var("LW_DEBUG_SETUP").is_ok() {
+            eprintln!("  mode: blockflag={} mapping={}", blockflag, mapping_idx);
+        }
+        modes.push(Mode {
+            blockflag,
+            mapping: mapping_idx,
+        });
     }
 
     // modebits: number of bits needed to encode mode number
@@ -265,6 +295,13 @@ fn unpack_mapping(
         residuesubmap[i] = rs;
     }
 
+    if std::env::var("LW_DEBUG_SETUP").is_ok() {
+        eprintln!(
+            "  mapping: submaps={} floorsubmap={:?} residuesubmap={:?}",
+            submaps, &floorsubmap, &residuesubmap
+        );
+    }
+
     let vp_mapping = VorbisInfoMapping0 {
         coupling_steps,
         coupling_mag: coupling_mag.clone(),
@@ -300,25 +337,25 @@ pub(crate) fn q5_setup_for(rate: SampleRate, channels: Channels) -> &'static Q5S
         (SampleRate::Hz44100, Channels::Mono) => {
             static CACHE: OnceLock<Q5Setup> = OnceLock::new();
             CACHE.get_or_init(|| {
-                unpack_q5_setup(Q5_SETUP_MONO44, 1).expect("mono44 setup parse failed")
+                unpack_q5_setup(Q5_SETUP_MONO44, 1, 44100).expect("mono44 setup parse failed")
             })
         }
         (SampleRate::Hz48000, Channels::Mono) => {
             static CACHE: OnceLock<Q5Setup> = OnceLock::new();
             CACHE.get_or_init(|| {
-                unpack_q5_setup(Q5_SETUP_MONO48, 1).expect("mono48 setup parse failed")
+                unpack_q5_setup(Q5_SETUP_MONO48, 1, 48000).expect("mono48 setup parse failed")
             })
         }
         (SampleRate::Hz44100, Channels::Stereo) => {
             static CACHE: OnceLock<Q5Setup> = OnceLock::new();
             CACHE.get_or_init(|| {
-                unpack_q5_setup(Q5_SETUP_STEREO44, 2).expect("stereo44 setup parse failed")
+                unpack_q5_setup(Q5_SETUP_STEREO44, 2, 44100).expect("stereo44 setup parse failed")
             })
         }
         (SampleRate::Hz48000, Channels::Stereo) => {
             static CACHE: OnceLock<Q5Setup> = OnceLock::new();
             CACHE.get_or_init(|| {
-                unpack_q5_setup(Q5_SETUP_STEREO48, 2).expect("stereo48 setup parse failed")
+                unpack_q5_setup(Q5_SETUP_STEREO48, 2, 48000).expect("stereo48 setup parse failed")
             })
         }
     }

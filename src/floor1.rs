@@ -791,6 +791,13 @@ fn fit_line(a: &[LsfitAcc], fits: usize, y0: &mut i32, y1: &mut i32, info: &Floo
         bn += a[i].bn as f64 + a[i].an as f64 * weight;
     }
 
+    if std::env::var("LW_DEBUG_FITLINE").is_ok() && fits >= 20 {
+        eprintln!(
+            "LW_FITLINE fits={} x0={} x1={}: xb={:.1} yb={:.1} x2b={:.1} xyb={:.1} bn={:.1}",
+            fits, x0, x1, xb, yb, x2b, xyb, bn
+        );
+    }
+
     if *y0 >= 0 {
         xb += x0 as f64;
         yb += *y0 as f64;
@@ -974,6 +981,10 @@ pub(crate) fn floor1_fit(look: &Floor1State, logmdct: &[f32], logmask: &[f32]) -
         let mut y0 = -200i32;
         let mut y1 = -200i32;
         fit_line(&fits, (posts - 1) as usize, &mut y0, &mut y1, info);
+
+        if std::env::var("LW_DEBUG_FLOOR1FIT").is_ok() {
+            eprintln!("LW_FLOOR1FIT base: y0={} y1={} n={}", y0, y1, n);
+        }
 
         fit_valueA[0] = y0;
         fit_valueB[0] = y0;
@@ -1518,6 +1529,39 @@ mod tests {
         assert!(state.posts > 0);
         assert!(state.n > 0);
         assert!(state.quant_q > 0);
+    }
+
+    #[test]
+    fn q5_floor1_postlist_print() {
+        let blob = Q5_SETUP_BLOB;
+        let mut r = BitReader::new(&blob[7..]);
+
+        let count = r.read(8) as usize + 1;
+        for _ in 0..count {
+            crate::codebook::unpack_codebook(&mut r).expect("codebook");
+        }
+
+        let floors = unpack_q5_floors(&mut r, count).expect("floors");
+        for (fi, setup) in floors.iter().enumerate() {
+            let total_posts: usize = (0..setup.partitions as usize)
+                .map(|i| setup.class_dim[setup.partitionclass[i] as usize] as usize)
+                .sum::<usize>()
+                + 2;
+            let state = floor1_look(setup.clone());
+            let postlist: Vec<i32> = (0..total_posts).map(|i| state.vi.postlist[i]).collect();
+            eprintln!(
+                "floor {fi}: posts={total_posts} mult={} n={}",
+                setup.mult, setup.postlist[1]
+            );
+            eprintln!("  postlist={:?}", postlist);
+            eprintln!("  sorted_index={:?}", &state.sorted_index[..total_posts]);
+            eprintln!(
+                "  sorted_postlist={:?}",
+                (0..total_posts)
+                    .map(|i| state.sorted_index[i])
+                    .collect::<Vec<_>>()
+            );
+        }
     }
 
     // -----------------------------------------------------------------------

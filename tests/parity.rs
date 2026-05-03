@@ -176,7 +176,6 @@ fn parity_silence_stereo48() {
 }
 
 #[test]
-#[ignore = "non-silence parity not yet achieved — floor/residue encoding diverges for tonal audio"]
 fn parity_sine_440_mono44() {
     let samples = make_sine_mono(44100, 440.0, 1.0);
     assert_parity(&samples, SampleRate::Hz44100, Channels::Mono);
@@ -204,6 +203,30 @@ fn parity_dump_files() {
     std::fs::write("/tmp/lw_parity.ogg", &lewtoff_bytes).unwrap();
     eprintln!(
         "Wrote ff_parity.ogg ({} bytes) and lw_parity.ogg ({} bytes)",
+        ffmpeg_bytes.len(),
+        lewtoff_bytes.len()
+    );
+}
+
+#[test]
+#[ignore = "manual dump for parity-diff analysis — sine wave"]
+fn parity_dump_sine_files() {
+    let samples = make_sine_mono(44100, 440.0, 1.0);
+    let ffmpeg_bytes = ffmpeg_encode_q5(&samples, 44100, 1);
+    let serial = extract_serial(&ffmpeg_bytes);
+    let (vendor, encoder_tag) = extract_comment_strings(&ffmpeg_bytes);
+    let lewtoff_bytes = lewtoff::encode_with_serial_and_meta(
+        &samples,
+        SampleRate::Hz44100,
+        Channels::Mono,
+        serial,
+        Some(&vendor),
+        Some(&encoder_tag),
+    );
+    std::fs::write("/tmp/ff_sine.ogg", &ffmpeg_bytes).unwrap();
+    std::fs::write("/tmp/lw_sine.ogg", &lewtoff_bytes).unwrap();
+    eprintln!(
+        "Wrote ff_sine.ogg ({} bytes) and lw_sine.ogg ({} bytes)",
         ffmpeg_bytes.len(),
         lewtoff_bytes.len()
     );
