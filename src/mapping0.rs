@@ -441,6 +441,14 @@ pub(crate) fn mapping0_forward(
                             }
                             let _ =
                                 std::fs::write("/tmp/lewtoff-debug/r_residue_input.bin", &bytes);
+                            // partword dump
+                            let mut pw_bytes = Vec::new();
+                            for ch_pw in pw.iter() {
+                                for v in ch_pw.iter() {
+                                    pw_bytes.extend_from_slice(&v.to_le_bytes());
+                                }
+                            }
+                            let _ = std::fs::write("/tmp/lewtoff-debug/r_partword.bin", &pw_bytes);
                         }
                     }
                     {

@@ -383,7 +383,40 @@ pub(crate) fn _01class(
     let n = (info.end - info.begin) as usize;
 
     let partvals = n / samples_per_partition;
-    let scale = 100.0f64 / samples_per_partition as f64;
+    // C: float scale = 100. / samples_per_partition;  (computed in f64, cast to f32).
+    // Then `ent *= scale` is int*float in f32. Match exactly.
+    let scale: f32 = (100.0_f64 / samples_per_partition as f64) as f32;
+    if std::env::var("LW_DEBUG_RES").is_ok() {
+        eprintln!(
+            "R_RES_INFO: possible_partitions={} samples_per_part={} begin={} end={} partvals={}",
+            possible_partitions, samples_per_partition, info.begin, info.end, partvals
+        );
+        eprintln!(
+            "R_CLASSMETRIC1: {:?}",
+            &info.classmetric1[..possible_partitions]
+        );
+        eprintln!(
+            "R_CLASSMETRIC2: {:?}",
+            &info.classmetric2[..possible_partitions]
+        );
+        let offset = info.begin as usize;
+        let mut max = 0i32;
+        let mut ent = 0i32;
+        for k in 0..samples_per_partition {
+            let v = in_[0][offset + k].abs();
+            if v > max {
+                max = v;
+            }
+            ent += v;
+        }
+        eprintln!(
+            "R_PART0: max={} ent_pre={} ent_post={} scale={}",
+            max,
+            ent,
+            (ent as f32 * scale) as i32,
+            scale
+        );
+    }
 
     let mut partword: Vec<Vec<i64>> = Vec::with_capacity(ch);
     for _i in 0..ch {
@@ -402,7 +435,8 @@ pub(crate) fn _01class(
                 }
                 ent += in_[j][offset + k].abs();
             }
-            let ent = (ent as f64 * scale) as i32;
+            // C: ent *= scale (int *= float → multiplied in f32, truncated to int).
+            let ent = (ent as f32 * scale) as i32;
 
             let mut kk = 0usize;
             while kk < possible_partitions - 1 {

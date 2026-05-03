@@ -19,6 +19,7 @@
    yet even a nagging little idea lurking in the shadows.  Oh and BTW,
    it's slow. */
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -463,6 +464,39 @@ static long **_01class(vorbis_block *vb,vorbis_look_residue *vl,
   }
 #endif
   look->frames++;
+
+  /* Dump partword[0] + classmetric values from the first invocation */
+  {
+    static int fired = 0;
+    if (!fired) {
+      fired = 1;
+      FILE *fpw = fopen("/tmp/lewtoff-debug/c_partword.bin", "wb");
+      if (fpw) {
+        fwrite(partword[0], sizeof(long), partvals, fpw);
+        fclose(fpw);
+      }
+      fprintf(stderr, "C_RES_INFO: possible_partitions=%d samples_per_part=%d begin=%d end=%d\n",
+              possible_partitions, samples_per_partition, info->begin, info->end);
+      fprintf(stderr, "C_CLASSMETRIC1: ");
+      for (int z=0; z<possible_partitions; z++) fprintf(stderr, "%d ", info->classmetric1[z]);
+      fprintf(stderr, "\n");
+      fprintf(stderr, "C_CLASSMETRIC2: ");
+      for (int z=0; z<possible_partitions; z++) fprintf(stderr, "%d ", info->classmetric2[z]);
+      fprintf(stderr, "\n");
+      /* For partition 0, dump max and ent */
+      {
+        int offset = info->begin;
+        int max=0,ent=0;
+        for (int k=0;k<samples_per_partition;k++) {
+          int v = abs(in[0][offset+k]);
+          if (v>max) max=v;
+          ent += v;
+        }
+        fprintf(stderr, "C_PART0: max=%d ent_pre_scale=%d ent_post_scale=%d scale=%f\n",
+                max, ent, (int)(ent*scale), scale);
+      }
+    }
+  }
 
   return(partword);
 }
