@@ -81,9 +81,14 @@ impl EnvelopeLookup {
     pub fn new(channels: usize, minenergy: f32) -> Self {
         let mut mdct_win = [0.0f32; ENV_WINLENGTH];
         for i in 0..ENV_WINLENGTH {
-            // libvorbis: e->mdct_win[i] = sin(i / (n-1) * PI); then squared.
-            let s = (i as f64 / (ENV_WINLENGTH - 1) as f64 * std::f64::consts::PI).sin();
-            mdct_win[i] = (s * s) as f32;
+            // libvorbis:
+            //   e->mdct_win[i] = sin(i/(n-1.)*M_PI);  // sin() returns f64,
+            //                                         // assigned to f32 truncates
+            //   e->mdct_win[i] *= e->mdct_win[i];     // f32 * f32 with already-
+            //                                         // truncated value
+            // Mirror that exactly: sin in f64, truncate to f32, then square in f32.
+            let s = (i as f64 / (ENV_WINLENGTH - 1) as f64 * std::f64::consts::PI).sin() as f32;
+            mdct_win[i] = s * s;
         }
 
         let band_specs: [(usize, usize); VE_BANDS] =
@@ -145,7 +150,28 @@ impl EnvelopeLookup {
         }
         let mut vec_in: [f32; ENV_WINLENGTH] = vec;
         let mut vec_out = [0.0f32; ENV_WINLENGTH / 2];
-        mdct_forward_envelope(&vec_in, &mut vec_out);
+        if std::env::var("LW_DEBUG_AMP_DBG").is_ok() {
+            use std::sync::atomic::{AtomicUsize, Ordering};
+            static N: AtomicUsize = AtomicUsize::new(0);
+            let n = N.fetch_add(1, Ordering::Relaxed);
+            if (32..=38).contains(&n) {
+                let mut s = format!("R_AMP_DBG call={} windowed_pcm_first8:", n);
+                for z in 0..8 {
+                    s.push_str(&format!(" 0x{:08x}", vec_in[z].to_bits()));
+                }
+                eprintln!("{}", s);
+            }
+            mdct_forward_envelope(&vec_in, &mut vec_out);
+            if (32..=38).contains(&n) {
+                let mut s = format!("R_AMP_DBG call={} mdct_out_first8:", n);
+                for z in 0..8 {
+                    s.push_str(&format!(" 0x{:08x}", vec_out[z].to_bits()));
+                }
+                eprintln!("{}", s);
+            }
+        } else {
+            mdct_forward_envelope(&vec_in, &mut vec_out);
+        }
         // Reuse vec to hold output spread/limited values across band loop:
         // first half stores spreaded values, second half unused.
         let _ = &mut vec_in;
@@ -267,7 +293,7 @@ impl EnvelopeLookup {
                 use std::sync::atomic::{AtomicUsize, Ordering};
                 static N: AtomicUsize = AtomicUsize::new(0);
                 let n = N.fetch_add(1, Ordering::Relaxed);
-                if n < 200 {
+                if n < 2000 {
                     eprintln!(
                         "R_AMP band={} acc=0x{:08x} postmax=0x{:08x} premax=0x{:08x} valmax={:.6} thresh={:.6} stretch={}",
                         j,
@@ -315,11 +341,10 @@ pub fn compute_marks(pcm_channels: &[Vec<f32>], gi: &VorbisInfoPsyGlobal) -> Vec
 
     let mut e = EnvelopeLookup::new(ch, gi.preecho_minenergy);
 
-    let n_steps = if n_samples >= ENV_WINLENGTH {
-        (n_samples - ENV_WINLENGTH) / ENV_SEARCHSTEP + 1
-    } else {
-        0
-    };
+    // libvorbis: `int last = v->pcm_current/searchstep - VE_WIN;`
+    // The for loop processes j=0..last-1. Mirror that exactly so we don't
+    // emit spurious marks for steps libvorbis skips at the buffer edge.
+    let n_steps = (n_samples / ENV_SEARCHSTEP).saturating_sub(VE_WIN);
     let mut marks = vec![false; n_steps + VE_POST + 1];
 
     let dbg = std::env::var("LW_DEBUG_ENV").is_ok();
@@ -553,7 +578,12 @@ pub fn next_w(
     let test_w = center_w + (if w == 1 { bs1 } else { bs0 }) / 4 + bs1 / 2 + bs0 / 4;
 
     let mut j = cursor;
-    let limit = marks.len() as i64 * step;
+    // libvorbis: `while(j < ve->current - searchstep)` where
+    // `ve->current = last * searchstep` and `last = pcm_current/searchstep - VE_WIN`.
+    // marks vec is sized to n_steps + VE_POST + 1, so n_steps = len - VE_POST - 1.
+    // Cursor walks up to (n_steps - 1) * step inclusive.
+    let n_steps = marks.len() as i64 - VE_POST as i64 - 1;
+    let limit = n_steps * step;
 
     while j < limit - step {
         if j >= test_w {

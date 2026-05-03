@@ -656,8 +656,8 @@ pub(crate) fn pre_extrap_for_test(pcm: &[f32]) -> [f32; CENTER_W] {
     preextrapolate_channel(pcm)
 }
 
-#[cfg(test)]
-pub(crate) fn post_extrap_for_test(pcm: &[f32]) -> Vec<f32> {
+#[doc(hidden)]
+pub fn post_extrap_for_test(pcm: &[f32]) -> Vec<f32> {
     postextrapolate_channel(pcm)
 }
 
@@ -801,16 +801,22 @@ pub(crate) fn encode_with_serial_and_meta(
         let mut env_pcm: Vec<Vec<f32>> = Vec::with_capacity(ch);
         for c in 0..ch {
             let pre = preextrapolate_channel(&pcm_channels[c][..lpc_train_end]);
-            let mut buf = Vec::with_capacity(CENTER_W + total_samples);
+            let post = postextrapolate_channel(&pcm_channels[c]);
+            let mut buf = Vec::with_capacity(CENTER_W + total_samples + POST_EXTRAPOLATE_LEN);
             for k in 0..CENTER_W {
                 buf.push(pre[CENTER_W - 1 - k]);
             }
             buf.extend_from_slice(&pcm_channels[c]);
+            buf.extend_from_slice(&post);
             env_pcm.push(buf);
         }
         let marks = crate::envelope::compute_marks(&env_pcm, &gi);
-        let (pattern, curmarks) =
-            crate::envelope::full_w_pattern_with_curmark(&marks, env_pcm[0].len() as i64);
+        // libvorbis terminates emission at v->centerW >= v->eofflag. eofflag
+        // is the END OF REAL AUDIO position. In our env_pcm coordinate that's
+        // CENTER_W (pre-extrap) + total_samples; post-extrap content extends
+        // the marks array but doesn't extend the eofflag.
+        let n_eof = (CENTER_W + total_samples) as i64;
+        let (pattern, curmarks) = crate::envelope::full_w_pattern_with_curmark(&marks, n_eof);
         (pattern, marks, curmarks)
     };
 
