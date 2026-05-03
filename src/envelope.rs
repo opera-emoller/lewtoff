@@ -151,9 +151,15 @@ impl EnvelopeLookup {
         // Near-DC accumulator decay term.
         let decay_init = {
             let band0 = self.filters.get_mut(band_offset).unwrap();
-            let temp = vec_out[0] * vec_out[0]
-                + 0.7 * vec_out[1] * vec_out[1]
-                + 0.2 * vec_out[2] * vec_out[2];
+            // libvorbis: `temp = vec[0]*vec[0] + .7*vec[1]*vec[1] + .2*vec[2]*vec[2]`
+            // where vec[i] are float and .7/.2 are DOUBLE constants. C
+            // promotes the multiplications to f64 and truncates only at the
+            // final assignment to `temp` (float). Rust f32 literals would
+            // keep the math in f32 throughout. Match C explicitly.
+            let v0 = vec_out[0] as f64;
+            let v1 = vec_out[1] as f64;
+            let v2 = vec_out[2] as f64;
+            let temp = (v0 * v0 + 0.7 * v1 * v1 + 0.2 * v2 * v2) as f32;
             let ptr = band0.nearptr;
             let decay;
             if ptr == 0 {
@@ -292,7 +298,6 @@ pub fn compute_marks(pcm_channels: &[Vec<f32>], gi: &VorbisInfoPsyGlobal) -> Vec
     let mut marks = vec![false; n_steps + VE_POST + 1];
 
     let dbg = std::env::var("LW_DEBUG_ENV").is_ok();
-    let mut n_dbg = 0;
     for j in 0..n_steps {
         let mut ret = 0i32;
         e.stretch += 1;
@@ -323,9 +328,8 @@ pub fn compute_marks(pcm_channels: &[Vec<f32>], gi: &VorbisInfoPsyGlobal) -> Vec
         if (ret & 4) != 0 {
             e.stretch = -1;
         }
-        if dbg && ret != 0 && n_dbg < 40 {
+        if dbg && ret != 0 {
             eprintln!("R_ENV_MARK j={} ret={} stretch={}", j, ret, e.stretch);
-            n_dbg += 1;
         }
     }
 
