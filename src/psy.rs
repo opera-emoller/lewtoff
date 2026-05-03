@@ -75,10 +75,12 @@ fn from_oc(o: f32) -> f32 {
     (((o as f64 + c1) * c2).exp()) as f32
 }
 
-/// rint: round to nearest integer (C standard).
+/// rint: round to nearest integer per C standard (half-to-even).
+/// Rust's `.round()` rounds half-away-from-zero, which diverges at
+/// half-integers (0.5 → 1 vs C's 0).
 #[inline(always)]
 fn rint(x: f32) -> f32 {
-    x.round()
+    x.round_ties_even()
 }
 
 /// todB: bit-manipulation fast dB (scales.h, VORBIS_IEEE_FLOAT32 path).
@@ -474,7 +476,12 @@ pub fn vp_psy_init(
         m_val: 1.0,
     };
 
-    p.shiftoc = (((gi.eighth_octave_lines * 8) as f32).ln() / 2.0_f32.ln()).round() as i32 - 1;
+    // libvorbis: `p->shiftoc = rint(log(gi->eighth_octave_lines*8.f)/log(2.f))-1;`
+    // log() is the f64 overload: f32 arg promotes to f64. f64 division.
+    // rint() rounds half-to-even.
+    let arg = (gi.eighth_octave_lines * 8) as f32 as f64;
+    let two = 2.0_f32 as f64;
+    p.shiftoc = (arg.ln() / two.ln()).round_ties_even() as i32 - 1;
 
     p.firstoc = (to_oc(0.25_f32 * rate as f32 * 0.5 / n as f32) as f64
         * (1i64 << (p.shiftoc + 1)) as f64
@@ -1289,11 +1296,8 @@ fn noise_normalize(
                 acc += ve;
                 sort_idx.push(j);
             } else {
-                out[j] = if r[j] < 0.0 {
-                    -(ve.sqrt().round() as i32)
-                } else {
-                    ve.sqrt().round() as i32
-                };
+                let s = (ve as f64).sqrt().round_ties_even();
+                out[j] = if r[j] < 0.0 { -(s as i32) } else { s as i32 };
                 q[j] = out[j] as f32 * out[j] as f32 * f[j];
             }
         }
