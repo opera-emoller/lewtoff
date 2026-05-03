@@ -242,6 +242,27 @@ pub(crate) fn residue_look(info: &ResidueSetup, books: &[Codebook]) -> ResidueLo
 // ---------------------------------------------------------------------------
 
 fn local_book_besterror(book: &Codebook, a: &mut [i32]) -> i32 {
+    let dbg_enabled = std::env::var("LW_DEBUG_BESTERR").is_ok();
+    let dbg_n = if dbg_enabled {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static N: AtomicUsize = AtomicUsize::new(0);
+        let n = N.fetch_add(1, Ordering::Relaxed);
+        if n < 200 {
+            eprintln!(
+                "R_BE n={} dim={} minval={} delta={} quantvals={} entries={} a={:?}",
+                n,
+                book.dim,
+                book.minval,
+                book.delta,
+                book.quantvals,
+                book.entries,
+                &a[..book.dim]
+            );
+        }
+        n
+    } else {
+        usize::MAX
+    };
     let dim = book.dim;
     let minval = book.minval;
     let del = book.delta;
@@ -335,6 +356,9 @@ fn local_book_besterror(book: &Codebook, a: &mut [i32]) -> i32 {
         }
     }
 
+    if dbg_enabled && dbg_n < 200 {
+        eprintln!("R_BE n={} returned index={}", dbg_n, index);
+    }
     index
 }
 

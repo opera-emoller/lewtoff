@@ -324,6 +324,17 @@ static int local_book_besterror(codebook *book,int *a){
   int index=0;
   /* assumes integer/centered encoder codebook maptype 1 no more than dim 8 */
   int p[8]={0,0,0,0,0,0,0,0};
+  /* DEBUG */
+  {
+    static int n_calls=0;
+    if(n_calls < 200){
+      fprintf(stderr,"C_BE n=%d dim=%d minval=%d delta=%d quantvals=%d entries=%d a=[",
+              n_calls, dim, minval, del, qv, book->entries);
+      for(int z=0;z<dim;z++) fprintf(stderr,"%d%s", a[z], z<dim-1?",":"");
+      fprintf(stderr,"]\n");
+      n_calls++;
+    }
+  }
 
   if(del!=1){
     for(i=0,o=dim;i<dim;i++){
@@ -373,6 +384,13 @@ static int local_book_besterror(codebook *book,int *a){
   if(index>-1){
     for(i=0;i<dim;i++)
       *a++ -= p[i];
+  }
+  {
+    static int n_ret=0;
+    if (n_ret < 200) {
+      fprintf(stderr,"C_BE n=%d returned index=%d\n", n_ret, index);
+      n_ret++;
+    }
   }
 
   return(index);
