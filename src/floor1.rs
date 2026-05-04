@@ -447,11 +447,17 @@ fn accumulate_fit(
     a.x1 = x1;
     let x1 = if x1 >= n { n - 1 } else { x1 };
 
-    let mut i = x0;
-    while i <= x1 {
-        let quantized = vorbis_dBquant(flr[i as usize]);
+    // Pre-slice both spectra to [x0..=x1] so the inner loop has no per-iter
+    // bounds checks on flr[i]/mdct[i].
+    let lo = x0 as usize;
+    let hi = x1 as usize;
+    let flr_w = &flr[lo..=hi];
+    let mdct_w = &mdct[lo..=hi];
+    for (k, (&fv, &mv)) in flr_w.iter().zip(mdct_w.iter()).enumerate() {
+        let i = x0 + k as i32;
+        let quantized = vorbis_dBquant(fv);
         if quantized != 0 {
-            if mdct[i as usize] + info.twofitatten >= flr[i as usize] {
+            if mv + info.twofitatten >= fv {
                 xa += i;
                 ya += quantized;
                 x2a += i * i;
@@ -467,7 +473,6 @@ fn accumulate_fit(
                 nb += 1;
             }
         }
-        i += 1;
     }
 
     a.xa = xa;
