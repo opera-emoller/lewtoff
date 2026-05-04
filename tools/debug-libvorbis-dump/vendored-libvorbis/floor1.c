@@ -637,7 +637,7 @@ int *floor1_fit(vorbis_block *vb,vorbis_look_floor1 *look,
     fit_valueA[1]=y1;
 
     if(getenv("LV_DEBUG_FLOOR1FIT")){
-      fprintf(stderr,"LV_FLOOR1FIT base: y0=%d y1=%d n=%ld\n", y0, y1, look->n);
+      fprintf(stderr,"LV_FLOOR1FIT base: y0=%d y1=%d n=%d\n", y0, y1, look->n);
     }
 
     /* Non degenerate case */

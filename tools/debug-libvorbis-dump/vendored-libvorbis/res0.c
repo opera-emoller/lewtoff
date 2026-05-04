@@ -328,7 +328,7 @@ static int local_book_besterror(codebook *book,int *a){
   {
     static int n_calls=0;
     if(n_calls < 200){
-      fprintf(stderr,"C_BE n=%d dim=%d minval=%d delta=%d quantvals=%d entries=%d a=[",
+      fprintf(stderr,"C_BE n=%d dim=%d minval=%d delta=%d quantvals=%d entries=%ld a=[",
               n_calls, dim, minval, del, qv, book->entries);
       for(int z=0;z<dim;z++) fprintf(stderr,"%d%s", a[z], z<dim-1?",":"");
       fprintf(stderr,"]\n");
@@ -508,7 +508,7 @@ static long **_01class(vorbis_block *vb,vorbis_look_residue *vl,
         fwrite(partword[0], sizeof(long), partvals, fpw);
         fclose(fpw);
       }
-      fprintf(stderr, "C_RES_INFO: possible_partitions=%d samples_per_part=%d begin=%d end=%d\n",
+      fprintf(stderr, "C_RES_INFO: possible_partitions=%d samples_per_part=%d begin=%ld end=%ld\n",
               possible_partitions, samples_per_partition, info->begin, info->end);
       fprintf(stderr, "C_CLASSMETRIC1: ");
       for (int z=0; z<possible_partitions; z++) fprintf(stderr, "%d ", info->classmetric1[z]);

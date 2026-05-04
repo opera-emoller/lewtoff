@@ -4,7 +4,7 @@
  * Reads i16 LE PCM (interleaved) from stdin, writes Ogg Vorbis to stdout.
  * Args: <rate> <channels>     e.g. ./oracle-encoder 44100 1
  *
- * Static-linked against ~/Documents/src/libvorbis/lib/*.c with:
+ * Static-linked against ~/Documents/src/libvorbis/lib (all .c files) with:
  *     -O0 -ffp-contract=off -std=c99
  * so its byte output is fully deterministic and matches lewtoff's no-FMA
  * arithmetic. Use this as the parity oracle in tests/parity.rs instead of

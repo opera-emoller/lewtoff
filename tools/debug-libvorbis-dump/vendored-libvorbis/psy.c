@@ -336,7 +336,7 @@ void _vp_psy_init(vorbis_look_psy *p,vorbis_info_psy *vi,
     p->bark[i]=((lo-1)*(1<<16))+(hi-1);
 
     if(i>=10 && i<=30 && p->vi->blockflag==1){
-      fprintf(stderr,"LV_BARK_INIT n=%d i=%d: lo=%ld hi=%ld\n", n, i, lo, hi);
+      fprintf(stderr,"LV_BARK_INIT n=%d i=%ld: lo=%ld hi=%ld\n", n, i, lo, hi);
     }
   }
 
@@ -795,12 +795,12 @@ static void bark_noise_hybridmp(int n,const long *b,
     R = (A + x * B) / D;
 
     if(i>=12 && i<=16){
-      fprintf(stderr,"LV_BNH i=%d lo=%ld hi=%ld x=%.1f tN=%.6f ty=%.6f R=%.6f noise=%.6f offset=%.6f fixed=%d\n",
+      fprintf(stderr,"LV_BNH i=%d lo=%d hi=%d x=%.1f tN=%.6f ty=%.6f R=%.6f noise=%.6f offset=%.6f fixed=%d\n",
         i, lo, hi, x, tN, tY, R, R-offset, offset, fixed);
     }
     if(i==118 || i==127){
       union { float f; unsigned u; } v;
-      fprintf(stderr,"LV_BNH i=%d lo=%ld hi=%ld x=%.1f tN=%g(0x%08x) tY=%g(0x%08x) tXX=%g(0x%08x) tX=%g(0x%08x) tXY=%g(0x%08x) A=%g(0x%08x) B=%g(0x%08x) D=%g(0x%08x) R=%g(0x%08x) offset=%g\n",
+      fprintf(stderr,"LV_BNH i=%d lo=%d hi=%d x=%.1f tN=%g(0x%08x) tY=%g(0x%08x) tXX=%g(0x%08x) tX=%g(0x%08x) tXY=%g(0x%08x) A=%g(0x%08x) B=%g(0x%08x) D=%g(0x%08x) R=%g(0x%08x) offset=%g\n",
         i, lo, hi, x,
         (v.f=tN, tN), v.u,
         (v.f=tY, tY), v.u,

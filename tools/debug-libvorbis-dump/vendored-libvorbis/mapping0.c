@@ -248,7 +248,7 @@ static int mapping0_forward(vorbis_block *vb){
 
   int modenumber=vb->W;
 
-  fprintf(stderr,"LV_BLOCK_SEQ seq=%lld n=%d lW=%d W=%d nW=%d blocktype=%d\n",
+  fprintf(stderr,"LV_BLOCK_SEQ seq=%lld n=%d lW=%ld W=%ld nW=%ld blocktype=%d\n",
     (long long)vb->sequence, n, vb->lW, vb->W, vb->nW, blocktype);
   vorbis_info_mapping0 *info=ci->map_param[modenumber];
   vorbis_look_psy *psy_look=b->psy+blocktype+(vb->W?2:0);
@@ -346,7 +346,7 @@ static int mapping0_forward(vorbis_block *vb){
       for(dbgj=0;dbgj<nb;dbgj++){
         int b=dbg_bins[dbgj];
         if(b<n/2)
-          fprintf(stderr,"LV_MDCT_RAW seq=%lld ch=0 n=%ld bin=%d: gmdct=%.10e logmdct=%.4f\n",
+          fprintf(stderr,"LV_MDCT_RAW seq=%lld ch=0 n=%d bin=%d: gmdct=%.10e logmdct=%.4f\n",
             (long long)vb->sequence,vb->pcmend,b,gmdct[i][b],
             todB(&gmdct[i][b])+0.345f);
       }
@@ -515,7 +515,7 @@ static int mapping0_forward(vorbis_block *vb){
         /* Actually we need to print BEFORE drft_forward - but we're AFTER _vp_noisemask.
            logfft = pcm (same pointer), and logfft was computed from drft of windowed pcm.
            So pcm is now the FFT'd data. Let's print the MDCT output gmdct[i] instead. */
-        fprintf(stderr,"LV_BLOCK0: n=%ld global_ampmax=%.6f local_ampmax=%.6f blocktype=%d\n",
+        fprintf(stderr,"LV_BLOCK0: n=%d global_ampmax=%.6f local_ampmax=%.6f blocktype=%d\n",
                 vb->pcmend, global_ampmax, local_ampmax[i], blocktype);
         fprintf(stderr,"LV_BLOCK0_LOGMDCT: [");
         for(dbgj=0;dbgj<n/2;dbgj++) fprintf(stderr,"%.6f%s",logmdct[dbgj],dbgj<n/2-1?",":"");
