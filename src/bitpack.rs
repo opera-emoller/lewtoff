@@ -1,5 +1,16 @@
 //! LSB-first bit packer/unpacker, per Vorbis I §2.1.4.
 
+/// libvorbis `ov_ilog` (lib/sharedbook.c). Returns ⌊log2(v)⌋ + 1 for v > 0,
+/// and 0 for v == 0. Used for bitwidth/codeword sizing throughout the codec.
+pub(crate) fn ov_ilog(mut v: u32) -> u32 {
+    let mut ret = 0u32;
+    while v != 0 {
+        ret += 1;
+        v >>= 1;
+    }
+    ret
+}
+
 #[derive(Default)]
 pub struct BitWriter {
     bytes: Vec<u8>,
@@ -96,13 +107,12 @@ impl<'a> BitReader<'a> {
     }
 
     /// Read `bits` bits and sign-extend to `i32`.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn read_signed(&mut self, bits: u32) -> i32 {
         let v = self.read(bits);
         if bits == 0 {
             return 0;
         }
-        // sign-extend
         let shift = 32 - bits;
         ((v << shift) as i32) >> shift
     }

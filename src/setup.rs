@@ -11,18 +11,7 @@ use crate::floor1::{floor1_look, unpack_floor1, Floor1State};
 use crate::psy::VorbisInfoMapping0;
 use crate::residue::{residue_look, unpack_residue, ResidueLook, ResidueSetup};
 
-// ---------------------------------------------------------------------------
-// ov_ilog: integer log2
-// ---------------------------------------------------------------------------
-
-fn ov_ilog(mut v: u32) -> u32 {
-    let mut ret = 0u32;
-    while v != 0 {
-        ret += 1;
-        v >>= 1;
-    }
-    ret
-}
+use crate::bitpack::ov_ilog;
 
 // ---------------------------------------------------------------------------
 // Mapping struct

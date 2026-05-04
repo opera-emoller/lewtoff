@@ -44,19 +44,7 @@ pub(crate) struct Codebook {
     pub delta: i32,
 }
 
-// ---------------------------------------------------------------------------
-// ov_ilog: integer log2, port of libvorbis ov_ilog
-// ---------------------------------------------------------------------------
-
-#[allow(non_snake_case)]
-fn ov_ilog(mut v: u32) -> u32 {
-    let mut ret = 0u32;
-    while v != 0 {
-        ret += 1;
-        v >>= 1;
-    }
-    ret
-}
+use crate::bitpack::ov_ilog;
 
 // ---------------------------------------------------------------------------
 // _float32_unpack: port of libvorbis _float32_unpack
@@ -378,8 +366,9 @@ pub(crate) fn unpack_codebook(r: &mut BitReader) -> Result<Codebook, CodebookErr
             );
 
             let quantvals = _book_maptype1_quantvals(entries as i64, dim as i64) as usize;
-            let minval = _float32_unpack(q_min).round() as i32;
-            let delta = _float32_unpack(q_delta).round() as i32;
+            // libvorbis sharedbook.c uses (int)rint(...) here; rint is half-to-even.
+            let minval = _float32_unpack(q_min).round_ties_even() as i32;
+            let delta = _float32_unpack(q_delta).round_ties_even() as i32;
 
             let codewords = make_codewords(&length_list, entries);
 
@@ -428,45 +417,6 @@ impl Codebook {
         }
         w.write(self.codewords[entry], len);
         len as usize
-    }
-
-    /// VQ search: find the nearest entry to `vector` (Euclidean distance),
-    /// subtract the matched entry's value from `vector` (residual in-place),
-    /// return the matched entry index.
-    ///
-    /// Port of libvorbis `_best` / `vorbis_book_besterror` (encode path).
-    pub(crate) fn vq_search(&self, vector: &mut [f32]) -> usize {
-        let vals = match &self.value_vectors {
-            Some(v) => v,
-            None => return 0,
-        };
-
-        let mut best = 0usize;
-        let mut best_error = f32::INFINITY;
-
-        for i in 0..self.entries {
-            if self.codeword_lengths[i] == 0 {
-                continue; // unused entry
-            }
-            let base = i * self.dim;
-            let mut err = 0.0f32;
-            for k in 0..self.dim {
-                let d = vector[k] - vals[base + k];
-                err += d * d;
-            }
-            if err < best_error {
-                best_error = err;
-                best = i;
-            }
-        }
-
-        // subtract matched entry (residual)
-        let base = best * self.dim;
-        for k in 0..self.dim {
-            vector[k] -= vals[base + k];
-        }
-
-        best
     }
 }
 
@@ -643,26 +593,6 @@ mod tests {
         let bits = book.encode(0, &mut w);
         assert_eq!(bits, 1);
         assert_eq!(w.into_bytes(), vec![0x00]);
-    }
-
-    #[test]
-    fn vq_search_finds_nearest() {
-        // 2-entry codebook, dim=1: entry 0 = -1.0, entry 1 = 1.0
-        let book = Codebook {
-            entries: 2,
-            dim: 1,
-            codewords: vec![0, 1],
-            codeword_lengths: vec![1, 1],
-            value_vectors: Some(vec![-1.0, 1.0]),
-            maptype: 1,
-            quantvals: 2,
-            minval: -1,
-            delta: 2,
-        };
-        let mut v = [0.3f32];
-        let entry = book.vq_search(&mut v);
-        assert_eq!(entry, 1); // nearest to 0.3 is 1.0
-        assert!((v[0] - (0.3 - 1.0)).abs() < 1e-5);
     }
 
     #[test]

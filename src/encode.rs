@@ -123,9 +123,7 @@ fn make_q5_psy_global(rate: i64, channels: usize) -> VorbisInfoPsyGlobal {
 // Array index 6 in each table is the authoritative source.
 // ---------------------------------------------------------------------------
 
-fn make_q5_psy(rate: i64) -> VorbisInfoPsy {
-    let _ = rate; // rate affects ATH but not the other params we set here
-
+fn make_q5_psy() -> VorbisInfoPsy {
     let mut vi = VorbisInfoPsy::default();
 
     vi.blockflag = 1; // long block
@@ -254,10 +252,7 @@ fn make_q5_psy(rate: i64) -> VorbisInfoPsy {
 // Compand: _psy_compand_44[2] (via _psy_compand_short_mapping[6]=2.0)
 // ---------------------------------------------------------------------------
 
-#[allow(dead_code)]
-fn make_q5_psy_impulse(rate: i64) -> VorbisInfoPsy {
-    let _ = rate;
-
+fn make_q5_psy_impulse() -> VorbisInfoPsy {
     let mut vi = VorbisInfoPsy::default();
 
     vi.blockflag = 0; // short block
@@ -381,9 +376,7 @@ fn make_q5_psy_impulse(rate: i64) -> VorbisInfoPsy {
 // Compand: _psy_compand_44[2] "mode A short" (via _psy_compand_short_mapping[6]=2.0)
 // ---------------------------------------------------------------------------
 
-fn make_q5_psy_short(rate: i64) -> VorbisInfoPsy {
-    let _ = rate;
-
+fn make_q5_psy_short() -> VorbisInfoPsy {
     let mut vi = VorbisInfoPsy::default();
 
     vi.blockflag = 0; // short block
@@ -477,9 +470,7 @@ fn make_q5_psy_short(rate: i64) -> VorbisInfoPsy {
 // Compand: same as long block (_psy_compand_long_mapping[6]=5 → _psy_compand_44[5])
 // ---------------------------------------------------------------------------
 
-fn make_q5_psy_transition(rate: i64) -> VorbisInfoPsy {
-    let _ = rate;
-
+fn make_q5_psy_transition() -> VorbisInfoPsy {
     let mut vi = VorbisInfoPsy::default();
 
     vi.blockflag = 1; // long block
@@ -764,13 +755,13 @@ pub(crate) fn encode_with_serial_and_meta(
     // Build psy state for long blocks (n2=1024), short blocks (n2=128), and
     // the short→long transition block (BLOCKTYPE_TRANSITION in libvorbis).
     let gi = make_q5_psy_global(rate_hz, ch);
-    let vi_long = make_q5_psy(rate_hz);
+    let vi_long = make_q5_psy();
     let psy_look_long: VorbisLookPsy = vp_psy_init(vi_long, &gi, HALF_BLOCK, rate_hz);
-    let vi_transition = make_q5_psy_transition(rate_hz);
+    let vi_transition = make_q5_psy_transition();
     let psy_look_transition: VorbisLookPsy = vp_psy_init(vi_transition, &gi, HALF_BLOCK, rate_hz);
-    let vi_short = make_q5_psy_impulse(rate_hz);
+    let vi_short = make_q5_psy_impulse();
     let psy_look_short: VorbisLookPsy = vp_psy_init(vi_short, &gi, SHORT_HALF, rate_hz);
-    let vi_padding = make_q5_psy_short(rate_hz);
+    let vi_padding = make_q5_psy_short();
     let psy_look_padding: VorbisLookPsy = vp_psy_init(vi_padding, &gi, SHORT_HALF, rate_hz);
 
     // De-interleave input into per-channel buffers

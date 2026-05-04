@@ -19,19 +19,7 @@
 use crate::bitpack::{BitReader, BitWriter};
 use crate::codebook::Codebook;
 
-// ---------------------------------------------------------------------------
-// ov_ilog — port of libvorbis ov_ilog (keep local, same as floor1.rs)
-// ---------------------------------------------------------------------------
-
-#[allow(non_snake_case)]
-fn ov_ilog(mut v: u32) -> u32 {
-    let mut ret = 0u32;
-    while v != 0 {
-        ret += 1;
-        v >>= 1;
-    }
-    ret
-}
+use crate::bitpack::ov_ilog;
 
 // ---------------------------------------------------------------------------
 // icount — port of icount in res0.c (popcount)

@@ -426,9 +426,6 @@ pub fn compute_marks(pcm_channels: &[Vec<f32>], gi: &VorbisInfoPsyGlobal) -> Vec
             let pcm = &pcm_channels[i][off..off + ENV_WINLENGTH];
             ret |= e.amp(gi, pcm, i * VE_BANDS);
         }
-        if marks.len() <= j + VE_POST {
-            marks.resize(j + VE_POST + 1, false);
-        }
         marks[j + VE_POST] = false;
         if (ret & 1) != 0 {
             marks[j] = true;
@@ -658,9 +655,6 @@ pub fn next_w(
         }
         let idx = (j / step) as usize;
         if idx < marks.len() && marks[idx] && j > center_w {
-            if j >= test_w {
-                return (1, j, curmark_in);
-            }
             return (0, j, j);
         }
         j += step;
@@ -837,68 +831,4 @@ pub fn simulate_eofflag(marks: &[bool], total_audio: i64, chunk_size: i64) -> i6
             w = nw;
         }
     }
-}
-
-/// Old, simplified pattern extractor — kept for reference.
-///
-/// Returns a vec of bool: true = long block (W=1), false = short (W=0).
-/// Mirrors `_ve_envelope_search` semantics: at each centerW, look ahead
-/// `testW = centerW + bs[W]/4 + bs[1]/2 + bs[0]/4` and return long if the
-/// next mark falls beyond testW.
-///
-/// `n_samples` is the total PCM length (real audio + post-extrapolation).
-pub fn block_size_pattern(marks: &[bool], n_samples: usize) -> Vec<bool> {
-    let bs0 = SHORT_BLOCK as i64;
-    let bs1 = LONG_BLOCK as i64;
-    let step = ENV_SEARCHSTEP as i64;
-
-    let mut centerW: i64 = bs1 / 2; // initial centerW per libvorbis init
-    let mut cursor: i64 = bs1 / 2;
-    let mut prev_w = false; // start with short
-
-    let mut pattern = Vec::new();
-
-    loop {
-        // Determine W for the upcoming block from current centerW position.
-        let testW = centerW + (if prev_w { bs1 } else { bs0 }) / 4 + bs1 / 2 + bs0 / 4;
-
-        // Walk the cursor forward through marks; first mark in (centerW, current)
-        // before testW means "go short" (W=false).
-        let mut w = true; // default: long (no mark within range)
-        let mut j = cursor;
-        let limit = (n_samples as i64).min((marks.len() as i64) * step);
-        while j < limit - step {
-            if j >= testW {
-                // ran out of marks before testW reached — long block
-                break;
-            }
-            if (j / step) >= 0 {
-                let mark_idx = (j / step) as usize;
-                if mark_idx < marks.len() && marks[mark_idx] && j > centerW {
-                    w = false;
-                    break;
-                }
-            }
-            j += step;
-        }
-        cursor = j;
-
-        pattern.push(w);
-
-        // Advance centerW by half_current + half_next (we don't know next yet,
-        // but per libvorbis the centerW advance happens before the next decision
-        // and uses the just-decided W as "current"). For our pre-compute model,
-        // approximate with bs[w]/4 + bs[w]/4 = bs[w]/2 for sequential blocks of
-        // the same size. Where the size changes, libvorbis emits the transition
-        // long block which itself uses bs1/4 + bs0/4 advance from a short.
-        let advance = if w { bs1 / 2 } else { bs0 / 2 };
-        centerW += advance;
-        prev_w = w;
-
-        if centerW >= n_samples as i64 {
-            break;
-        }
-    }
-
-    pattern
 }
