@@ -796,18 +796,9 @@ fn _01forward_indexed(
 ) -> i32 {
     let used = indices.len();
 
-    // Partition word slices: reindex by compacted channel order
-    // partword[j] corresponds to original channel indices[j]
-    let compacted_pw: Vec<Vec<i64>> = indices
-        .iter()
-        .map(|&idx| {
-            if idx < partword.len() {
-                partword[idx].clone()
-            } else {
-                Vec::new()
-            }
-        })
-        .collect();
+    // partword from res1_class is already compacted to `used` rows (one per
+    // nonzero channel), in the same order as `indices`. So row j here matches
+    // the original channel `indices[j]` in `in_`.
 
     // We need to call _01forward with compacted in_ channels.
     // Since we can't easily compact &mut slices without unsafe, we use the
@@ -828,11 +819,11 @@ fn _01forward_indexed(
         while i < partvals {
             if s == 0 {
                 for j in 0..used {
-                    let mut val = compacted_pw[j][i];
+                    let mut val = partword[j][i];
                     for k in 1..partitions_per_word {
                         val *= possible_partitions as i64;
                         if i + k < partvals {
-                            val += compacted_pw[j][i + k];
+                            val += partword[j][i + k];
                         }
                     }
                     if val < look.phrasebook_entries as i64 {
@@ -860,9 +851,9 @@ fn _01forward_indexed(
                 for j in 0..used {
                     let orig_ch = indices[j];
                     if s == 0 {
-                        resvals[compacted_pw[j][i] as usize] += samples_per_partition as i64;
+                        resvals[partword[j][i] as usize] += samples_per_partition as i64;
                     }
-                    let pw = compacted_pw[j][i] as usize;
+                    let pw = partword[j][i] as usize;
                     if info.secondstages[pw] & (1 << s) != 0 {
                         if pw < look.partbooks.len() && s < look.partbooks[pw].len() {
                             if let Some(book_idx) = look.partbooks[pw][s] {

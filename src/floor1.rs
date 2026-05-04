@@ -615,11 +615,14 @@ fn inspect_error(
     mse = y - val;
     mse *= mse;
     n += 1;
+    // C: `if(y+info->maxover<val)` — int + float < int promotes both sides to
+    // float. For Q5 maxover/maxunder are integers (60/30) so the f32 path is
+    // bit-identical to the prior i32 cast; preserved as f32 for non-Q5 floors.
     if mdct[x as usize] + info.twofitatten >= mask[x as usize] {
-        if y + (info.maxover as i32) < val {
+        if (y as f32) + info.maxover < val as f32 {
             return 1;
         }
-        if y - (info.maxunder as i32) > val {
+        if (y as f32) - info.maxunder > val as f32 {
             return 1;
         }
     }
@@ -642,23 +645,27 @@ fn inspect_error(
         n += 1;
         if mdct[x as usize] + info.twofitatten >= mask[x as usize] {
             if val != 0 {
-                if y + (info.maxover as i32) < val {
+                if (y as f32) + info.maxover < val as f32 {
                     return 1;
                 }
-                if y - (info.maxunder as i32) > val {
+                if (y as f32) - info.maxunder > val as f32 {
                     return 1;
                 }
             }
         }
     }
 
-    if info.maxover as i32 * info.maxover as i32 / n > info.maxerr as i32 {
+    // C: `info->maxover*info->maxover/n > info->maxerr` — float*float / int
+    // is f32 (int promotes to f32 for the division). Compared to f32 maxerr.
+    if info.maxover * info.maxover / n as f32 > info.maxerr {
         return 0;
     }
-    if info.maxunder as i32 * info.maxunder as i32 / n > info.maxerr as i32 {
+    if info.maxunder * info.maxunder / n as f32 > info.maxerr {
         return 0;
     }
-    if mse / n > info.maxerr as i32 {
+    // C: `mse/n > info->maxerr` — int/int (truncates), then int > float
+    // promotes the truncated int to f32. Keep the integer truncation.
+    if ((mse / n) as f32) > info.maxerr {
         return 1;
     }
     0

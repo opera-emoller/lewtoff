@@ -1,5 +1,5 @@
-pub mod drft;
-pub mod lookup;
-pub mod masking;
-pub mod trig;
-pub mod window;
+pub(crate) mod drft;
+pub(crate) mod lookup;
+pub(crate) mod masking;
+pub(crate) mod trig;
+pub(crate) mod window;

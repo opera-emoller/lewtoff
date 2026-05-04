@@ -702,12 +702,17 @@ fn postextrapolate_channel_with_n(pcm: &[f32], n_train: usize) -> Vec<f32> {
 }
 
 fn random_serial() -> u32 {
+    // Wider seed than just subsec_nanos: fold seconds and the address of a
+    // local stack variable into the mix so two encodes started in the same
+    // millisecond don't collide. Callers that need true uniqueness across
+    // hosts should pass an explicit serial via encode_with_serial.
     use std::time::{SystemTime, UNIX_EPOCH};
-    let t = SystemTime::now()
+    let d = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| d.subsec_nanos())
-        .unwrap_or(0x1234_5678);
-    t ^ 0xDEAD_BEEF
+        .unwrap_or_default();
+    let stack_addr = &d as *const _ as usize as u64;
+    let mix = (d.as_nanos() as u64) ^ d.as_secs().rotate_left(17) ^ stack_addr;
+    (mix as u32) ^ ((mix >> 32) as u32)
 }
 
 pub(crate) fn encode_impl(samples: &[i16], rate: SampleRate, channels: Channels) -> Vec<u8> {
@@ -743,10 +748,18 @@ pub(crate) fn encode_with_serial_and_meta(
     // Setup data (codebooks, floors, residues, mappings, modes)
     let setup = q5_setup_for(rate, channels);
 
-    // Find mode indices: mode 0 = short (blockflag=false), mode 1 = long (blockflag=true).
-    // Q5 always has mode 0 = short, mode 1 = long (per the setup blob).
-    let short_mode_number = setup.modes.iter().position(|m| !m.blockflag).unwrap_or(0);
-    let long_mode_number = setup.modes.iter().position(|m| m.blockflag).unwrap_or(1);
+    // Q5 setup blob always has mode 0 = short (blockflag=false) and mode 1 =
+    // long (blockflag=true); the closed input space guarantees both exist.
+    let short_mode_number = setup
+        .modes
+        .iter()
+        .position(|m| !m.blockflag)
+        .expect("Q5 setup must contain a short-block mode");
+    let long_mode_number = setup
+        .modes
+        .iter()
+        .position(|m| m.blockflag)
+        .expect("Q5 setup must contain a long-block mode");
     let long_mode = &setup.modes[long_mode_number];
     let long_mapping = &setup.mappings[long_mode.mapping];
     let short_mode = &setup.modes[short_mode_number];
@@ -1038,7 +1051,6 @@ pub(crate) fn encode_with_serial_and_meta(
 
         let windowed_blocks: Vec<Vec<f32>>;
         let block_mode: BlockMode;
-        let decoded_samples: u64;
 
         // Helper to read a sample, falling back to post-extrapolation past EOS.
         let read_sample = |c: usize, idx: usize| -> f32 {
@@ -1091,7 +1103,6 @@ pub(crate) fn encode_with_serial_and_meta(
                 prev_window: false,
                 next_window: false,
             };
-            decoded_samples = SHORT_HALF as u64;
         } else {
             // For a long block whose previous block was short, the un-windowed
             // middle section of the analysis frame needs the 448 samples
@@ -1142,7 +1153,6 @@ pub(crate) fn encode_with_serial_and_meta(
                 prev_window: prev_is_long,
                 next_window: nw_is_long,
             };
-            decoded_samples = LONG_HALF as u64;
         }
 
         // libvorbis sets vb->granulepos = v->granulepos at packet emit time,
@@ -1151,8 +1161,17 @@ pub(crate) fn encode_with_serial_and_meta(
         // granulepos accumulates movementW from PRIOR blocks. At EOS, libvorbis
         // caps granulepos so final = total_samples (subtracting the centerW
         // over-shoot beyond eofflag).
-        let _ = decoded_samples;
-        let granule_pos = cumulative_granule.min(total_samples as u64);
+        debug_assert!(
+            is_last || cumulative_granule <= total_samples as u64,
+            "cumulative_granule overshoot on non-final packet: {} > {}",
+            cumulative_granule,
+            total_samples
+        );
+        let granule_pos = if is_last {
+            cumulative_granule.min(total_samples as u64)
+        } else {
+            cumulative_granule
+        };
         let movement_w: u64 = (if cur_w == 1 {
             LONG_BLOCK as u64
         } else {
