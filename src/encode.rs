@@ -10,15 +10,15 @@
 use crate::bitpack::BitWriter;
 use crate::headers::{write_comment_header_with_strings, write_id_header, write_setup_header};
 use crate::lpc::{lpc_from_data, lpc_predict};
-use crate::mapping0::{mapping0_forward, BlockMode};
+use crate::mapping0::{BlockMode, mapping0_forward};
 use crate::ogg_pages::OggStreamWriter;
 use crate::psy::{
-    vp_psy_init, VorbisInfoPsy, VorbisInfoPsyGlobal, VorbisLookPsy, NOISE_COMPAND_LEVELS,
-    PACKETBLOBS, P_BANDS,
+    NOISE_COMPAND_LEVELS, P_BANDS, PACKETBLOBS, VorbisInfoPsy, VorbisInfoPsyGlobal, VorbisLookPsy,
+    vp_psy_init,
 };
 use crate::setup::q5_setup_for;
 use crate::window::{
-    WindowingBuffer, BLOCK_SIZE, HALF_BLOCK, LONG_BLOCK, LONG_HALF, SHORT_BLOCK, SHORT_HALF,
+    BLOCK_SIZE, HALF_BLOCK, LONG_BLOCK, LONG_HALF, SHORT_BLOCK, SHORT_HALF, WindowingBuffer,
 };
 use crate::{Channels, SampleRate};
 

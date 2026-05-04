@@ -472,11 +472,11 @@ mod tests {
         // ordered encoding: how many entries at each length
         // length 1: 1 entry -> write count=1 using ov_ilog(4-0)=3 bits
         w.write(1, 3); // entries at length 1: 1
-                       // now i=1, length=2; ov_ilog(4-1)=2 bits
+        // now i=1, length=2; ov_ilog(4-1)=2 bits
         w.write(1, 2); // entries at length 2: 1
-                       // now i=2, length=3; ov_ilog(4-2)=2 bits
+        // now i=2, length=3; ov_ilog(4-2)=2 bits
         w.write(2, 2); // entries at length 3: 2
-                       // maptype = 0 (no mapping)
+        // maptype = 0 (no mapping)
         w.write(0, 4);
     }
 

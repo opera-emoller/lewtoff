@@ -178,5 +178,7 @@ fn main() {
     }
     println!("floor_bits matches ({c_floor_bits} bits)");
 
-    println!("\nAll layers match through floor_bits — divergence must be downstream (residue or coupling).");
+    println!(
+        "\nAll layers match through floor_bits — divergence must be downstream (residue or coupling)."
+    );
 }

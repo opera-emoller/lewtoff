@@ -27,7 +27,7 @@
 //! (silence, sine, ramp). Real-world audio with attacks would require full
 //! transient detection from libvorbis vorbis_analysis_blockout.
 
-use crate::tables::window::{WIN_HALF_2048, WIN_HALF_256};
+use crate::tables::window::{WIN_HALF_256, WIN_HALF_2048};
 
 pub(crate) const LONG_BLOCK: usize = 2048;
 pub(crate) const SHORT_BLOCK: usize = 256;

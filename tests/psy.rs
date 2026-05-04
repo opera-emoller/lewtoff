@@ -5,7 +5,7 @@
 
 #![allow(clippy::field_reassign_with_default)]
 
-use lewtoff::psy::{vp_noisemask, vp_psy_init, vp_tonemask, VorbisInfoPsy, VorbisInfoPsyGlobal};
+use lewtoff::psy::{VorbisInfoPsy, VorbisInfoPsyGlobal, vp_noisemask, vp_psy_init, vp_tonemask};
 
 /// Build a minimal VorbisInfoPsy matching libvorbis Q5 long-block params.
 /// These values are taken from lib/modes/setup_44.h / psych_44.h for the

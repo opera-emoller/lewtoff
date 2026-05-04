@@ -4,8 +4,8 @@ members = [".", "tools/gen-tables", "tools/gen-setup-blob", "tools/gen-header-ve
 [package]
 name = "lewtoff"
 version = "0.1.0"
-edition = "2021"
-rust-version = "1.83"
+edition = "2024"
+rust-version = "1.85"
 license = "Apache-2.0"
 description = "Pure-Rust Ogg Vorbis encoder, byte-identical to libvorbis Q5."
 repository = "https://github.com/opera-emoller/lewtoff"

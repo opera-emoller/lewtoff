@@ -27,6 +27,20 @@ use crate::tables::masking::{ATH, EHMER_MAX, EHMER_OFFSET, MAX_ATH, TONEMASKS};
 
 const NEGINF: f32 = -9999.0_f32;
 
+/// Upper bound on `VorbisLookPsy::total_octave_lines` — used to size the
+/// stack-allocated seed scratch in `vp_tonemask`. Observed max for the Q5
+/// supported input space is 777 (long block at 44.1kHz); 1024 gives some
+/// headroom and matches the long-block half-spectrum size.
+const MAX_OCTAVE_LINES: usize = 1024;
+
+/// Q5 normal_partition is 32; older 16-partition layouts also fit. Used for
+/// stack-allocated scratch in `vp_couple_quantize_normalize`.
+const MAX_PARTITION: usize = 32;
+/// Mono or stereo for the supported input space.
+const MAX_CH: usize = 2;
+/// Stereo Q5 has 1 coupling step; mono has 0. 2 is overkill safe.
+const MAX_COUPLING_STEPS: usize = 2;
+
 pub const P_BANDS: usize = 17;
 pub const P_LEVELS: usize = 8;
 pub const P_LEVEL_0: f32 = 30.0_f32;
@@ -490,6 +504,11 @@ pub fn vp_psy_init(
         * (1i64 << (p.shiftoc + 1)) as f64
         + 0.5) as i64;
     p.total_octave_lines = (maxoc - p.firstoc + 1) as i32;
+    debug_assert!(
+        p.total_octave_lines <= MAX_OCTAVE_LINES as i32,
+        "total_octave_lines={} exceeds MAX_OCTAVE_LINES; bump const",
+        p.total_octave_lines
+    );
 
     // AoTuV HF weighting
     p.m_val = 1.0;
@@ -850,11 +869,19 @@ fn max_seeds(p: &VorbisLookPsy, seed: &mut [f32], flr: &mut [f32]) {
 // ---------------------------------------------------------------------------
 
 fn bark_noise_hybridmp(n: usize, b: &[i64], f: &[f32], noise: &mut [f32], offset: f32, fixed: i32) {
-    let mut big_n = vec![0.0_f32; n];
-    let mut big_x = vec![0.0_f32; n];
-    let mut big_xx = vec![0.0_f32; n];
-    let mut big_y = vec![0.0_f32; n];
-    let mut big_xy = vec![0.0_f32; n];
+    // Stack-allocated prefix-sum scratch (n <= LONG_HALF=1024). Avoids the
+    // 5 × vec![0.0; n] heap allocs that would otherwise fire twice per
+    // long block (in vp_noisemask).
+    let mut big_n_arr = [0.0_f32; crate::window::LONG_HALF];
+    let mut big_x_arr = [0.0_f32; crate::window::LONG_HALF];
+    let mut big_xx_arr = [0.0_f32; crate::window::LONG_HALF];
+    let mut big_y_arr = [0.0_f32; crate::window::LONG_HALF];
+    let mut big_xy_arr = [0.0_f32; crate::window::LONG_HALF];
+    let big_n = &mut big_n_arr[..n];
+    let big_x = &mut big_x_arr[..n];
+    let big_xx = &mut big_xx_arr[..n];
+    let big_y = &mut big_y_arr[..n];
+    let big_xy = &mut big_xy_arr[..n];
 
     let mut tn: f32;
     let mut tx: f32;
@@ -966,22 +993,50 @@ fn bark_noise_hybridmp(n: usize, b: &[i64], f: &[f32], noise: &mut [f32], offset
         r = (big_a + x * big_b) / big_d;
 
         if (12..=16).contains(&i) && crate::debug_flag!("LW_DEBUG_BNH") {
-            eprintln!("LW_BNH i={} lo={} hi={} x={:.1} tn={:.6} tx={:.6} txx={:.6} ty={:.6} txy={:.6} A={:.6} B={:.6} D={:.6} R={:.6} noise={:.6} offset={:.6}",
-                i, lo, hi, x, tn, tx, txx, ty, txy, big_a, big_b, big_d, r, r - offset, offset);
+            eprintln!(
+                "LW_BNH i={} lo={} hi={} x={:.1} tn={:.6} tx={:.6} txx={:.6} ty={:.6} txy={:.6} A={:.6} B={:.6} D={:.6} R={:.6} noise={:.6} offset={:.6}",
+                i,
+                lo,
+                hi,
+                x,
+                tn,
+                tx,
+                txx,
+                ty,
+                txy,
+                big_a,
+                big_b,
+                big_d,
+                r,
+                r - offset,
+                offset
+            );
         }
         if (i == 118 || i == 127) && crate::debug_flag!("LW_DEBUG_BNH118") {
             eprintln!(
                 "LW_BNH i={} lo={} hi={} x={} tn={}(0x{:08x}) ty={}(0x{:08x}) txx={}(0x{:08x}) tx={}(0x{:08x}) txy={}(0x{:08x}) A={}(0x{:08x}) B={}(0x{:08x}) D={}(0x{:08x}) R={}(0x{:08x})",
-                i, lo, hi, x,
-                tn, tn.to_bits(),
-                ty, ty.to_bits(),
-                txx, txx.to_bits(),
-                tx, tx.to_bits(),
-                txy, txy.to_bits(),
-                big_a, big_a.to_bits(),
-                big_b, big_b.to_bits(),
-                big_d, big_d.to_bits(),
-                r, r.to_bits(),
+                i,
+                lo,
+                hi,
+                x,
+                tn,
+                tn.to_bits(),
+                ty,
+                ty.to_bits(),
+                txx,
+                txx.to_bits(),
+                tx,
+                tx.to_bits(),
+                txy,
+                txy.to_bits(),
+                big_a,
+                big_a.to_bits(),
+                big_b,
+                big_b.to_bits(),
+                big_d,
+                big_d.to_bits(),
+                r,
+                r.to_bits(),
             );
         }
 
@@ -1118,7 +1173,10 @@ pub fn vp_tonemask(
     local_specmax: f32,
 ) {
     let n = p.n;
-    let mut seed = vec![NEGINF; p.total_octave_lines as usize];
+    // Stack-allocated seed scratch. Q5 max observed total_octave_lines is 777
+    // (long block at 44.1kHz); MAX_OCTAVE_LINES gives headroom for 48k.
+    let mut seed_arr = [NEGINF; MAX_OCTAVE_LINES];
+    let mut seed = &mut seed_arr[..p.total_octave_lines as usize];
 
     let mut att = local_specmax + p.vi.ath_adjatt;
     if att < p.vi.ath_maxatt {
@@ -1129,7 +1187,7 @@ pub fn vp_tonemask(
         logmask[i] = p.ath[i] + att;
     }
 
-    seed_loop(p, &p.tonecurves, logfft, logmask, &mut seed, global_specmax);
+    seed_loop(p, &p.tonecurves, logfft, logmask, seed, global_specmax);
     if crate::debug_dump::dump_enabled() {
         use std::sync::atomic::{AtomicBool, Ordering};
         static FIRED: AtomicBool = AtomicBool::new(false);
@@ -1141,7 +1199,7 @@ pub fn vp_tonemask(
             let _ = std::fs::write("/tmp/lewtoff-debug/r_tone_seed.bin", &bytes);
         }
     }
-    max_seeds(p, &mut seed, logmask);
+    max_seeds(p, seed, logmask);
 }
 
 // ---------------------------------------------------------------------------
@@ -1179,11 +1237,7 @@ pub fn vp_offset_and_mix(
             let val_diff = val - logmdct[i];
             let de: f32 = if val_diff > coeffi {
                 let d = 1.0_f64 - (val_diff - coeffi) as f64 * 0.005_f64 * cx as f64;
-                if d < 0.0 {
-                    0.0001_f32
-                } else {
-                    d as f32
-                }
+                if d < 0.0 { 0.0001_f32 } else { d as f32 }
             } else {
                 (1.0_f64 - (val_diff - coeffi) as f64 * 0.0003_f64 * cx as f64) as f32
             };
@@ -1200,11 +1254,7 @@ pub fn vp_offset_and_mix(
 pub fn vp_ampmax_decay(amp: f32, gi: &VorbisInfoPsyGlobal, n: usize, rate: i64) -> f32 {
     let secs = n as f32 / rate as f32;
     let result = amp + secs * gi.ampmax_att_per_sec;
-    if result < -9999.0 {
-        -9999.0
-    } else {
-        result
-    }
+    if result < -9999.0 { -9999.0 } else { result }
 }
 
 // ---------------------------------------------------------------------------
@@ -1357,22 +1407,31 @@ pub fn vp_couple_quantize_normalize(
         postpoint = STEREO_THRESHHOLDS_LIMITED[g.coupling_postpointamp[blobno] as usize] as f32;
     }
 
-    let mut raw: Vec<Vec<f32>> = vec![vec![0.0; partition]; ch];
-    let mut quant: Vec<Vec<f32>> = vec![vec![0.0; partition]; ch];
-    let mut floor_v: Vec<Vec<f32>> = vec![vec![0.0; partition]; ch];
-    let mut flag: Vec<Vec<i32>> = vec![vec![0; partition]; ch];
-    let mut nz: Vec<i32> = vec![0; ch];
-    let mut acc: Vec<f32> = vec![0.0; ch + vi.coupling_steps];
+    // Stack-allocated per-block scratch. Q5 has partition <= 32, ch <= 2,
+    // coupling_steps <= 1. Fixed bounds avoid the per-call heap-alloc churn
+    // of vec![vec![0.0; partition]; ch].
+    debug_assert!(
+        partition <= MAX_PARTITION,
+        "partition {} > MAX_PARTITION",
+        partition
+    );
+    debug_assert!(ch <= MAX_CH, "ch {} > MAX_CH", ch);
+    let mut raw: [[f32; MAX_PARTITION]; MAX_CH] = [[0.0; MAX_PARTITION]; MAX_CH];
+    let mut quant: [[f32; MAX_PARTITION]; MAX_CH] = [[0.0; MAX_PARTITION]; MAX_CH];
+    let mut floor_v: [[f32; MAX_PARTITION]; MAX_CH] = [[0.0; MAX_PARTITION]; MAX_CH];
+    let mut flag: [[i32; MAX_PARTITION]; MAX_CH] = [[0; MAX_PARTITION]; MAX_CH];
+    let mut nz: [i32; MAX_CH] = [0; MAX_CH];
+    let mut acc: [f32; MAX_CH + MAX_COUPLING_STEPS] = [0.0; MAX_CH + MAX_COUPLING_STEPS];
 
     let mut i = 0;
     while i < n {
         let jn = partition.min(n - i);
         let mut track = 0usize;
 
-        nz.copy_from_slice(nonzero);
+        nz[..ch].copy_from_slice(nonzero);
 
-        for fl in flag.iter_mut() {
-            for v in fl.iter_mut() {
+        for fl in flag[..ch].iter_mut() {
+            for v in fl[..jn].iter_mut() {
                 *v = 0;
             }
         }

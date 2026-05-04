@@ -454,7 +454,7 @@ mod tests {
         let first_marks: Vec<usize> = marks
             .iter()
             .enumerate()
-            .filter(|(_, &b)| b)
+            .filter(|(_, b)| **b)
             .map(|(i, _)| i)
             .take(10)
             .collect();
@@ -539,7 +539,7 @@ mod tests {
         let first_marks: Vec<usize> = marks
             .iter()
             .enumerate()
-            .filter(|(_, &b)| b)
+            .filter(|(_, b)| **b)
             .map(|(i, _)| i)
             .take(20)
             .collect();

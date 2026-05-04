@@ -9,8 +9,8 @@
 #![allow(clippy::approx_constant)]
 
 use crate::tables::trig::{
-    BITREV_128, BITREV_2048, BITREV_256, SCALE_128, SCALE_2048, SCALE_256, TRIG_128, TRIG_2048,
-    TRIG_256,
+    BITREV_128, BITREV_256, BITREV_2048, SCALE_128, SCALE_256, SCALE_2048, TRIG_128, TRIG_256,
+    TRIG_2048,
 };
 
 // Constants from mdct.h (float mode)

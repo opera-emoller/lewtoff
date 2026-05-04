@@ -6,10 +6,10 @@
 #![allow(clippy::needless_range_loop)]
 
 use crate::bitpack::BitReader;
-use crate::codebook::{unpack_codebook, Codebook};
-use crate::floor1::{floor1_look, unpack_floor1, Floor1State};
+use crate::codebook::{Codebook, unpack_codebook};
+use crate::floor1::{Floor1State, floor1_look, unpack_floor1};
 use crate::psy::VorbisInfoMapping0;
-use crate::residue::{residue_look, unpack_residue, ResidueLook, ResidueSetup};
+use crate::residue::{ResidueLook, ResidueSetup, residue_look, unpack_residue};
 
 use crate::bitpack::ov_ilog;
 

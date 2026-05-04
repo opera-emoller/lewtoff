@@ -14,14 +14,14 @@
 use crate::bitpack::BitWriter;
 use crate::debug_dump as dd;
 use crate::drft::{drft_forward_long, drft_forward_short};
-use crate::floor1::{floor1_encode, floor1_fit, Floor1State};
+use crate::floor1::{Floor1State, floor1_encode, floor1_fit};
 use crate::mdct::{mdct_forward_long, mdct_forward_short};
 use crate::psy::{
-    to_db, vp_ampmax_decay, vp_noisemask, vp_offset_and_mix, vp_tonemask, VorbisInfoPsyGlobal,
-    VorbisLookPsy,
+    VorbisInfoPsyGlobal, VorbisLookPsy, to_db, vp_ampmax_decay, vp_noisemask, vp_offset_and_mix,
+    vp_tonemask,
 };
 use crate::residue::{
-    res1_class, res1_forward, res2_class, res2_forward, ResidueLook, ResidueSetup,
+    ResidueLook, ResidueSetup, res1_class, res1_forward, res2_class, res2_forward,
 };
 use crate::setup::Mapping;
 use crate::window::{LONG_BLOCK, LONG_HALF, SHORT_BLOCK, SHORT_HALF};

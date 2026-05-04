@@ -317,11 +317,7 @@ pub(crate) fn render_point(x0: i32, x1: i32, y0: i32, y1: i32, x: i32) -> i32 {
     let err = ady * (x - x0);
 
     let off = err / adx;
-    if dy < 0 {
-        y0 - off
-    } else {
-        y0 + off
-    }
+    if dy < 0 { y0 - off } else { y0 + off }
 }
 
 // ---------------------------------------------------------------------------
@@ -935,7 +931,7 @@ pub(crate) fn floor1_encode(
 
             if (post[i] & 0x8000) != 0 || predicted == post[i] {
                 post[i] = predicted | 0x8000; // in case there was roundoff jitter
-                                              // in interpolation
+                // in interpolation
                 out[i] = 0;
             } else {
                 let headroom = if look.quant_q - predicted < predicted {

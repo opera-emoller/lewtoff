@@ -9,7 +9,7 @@
 #![allow(clippy::needless_range_loop)]
 #![allow(non_snake_case)]
 
-use crate::tables::drft::{DRFT_SPLIT_2048, DRFT_SPLIT_256, DRFT_TRIG_2048, DRFT_TRIG_256};
+use crate::tables::drft::{DRFT_SPLIT_256, DRFT_SPLIT_2048, DRFT_TRIG_256, DRFT_TRIG_2048};
 use crate::window::{LONG_BLOCK, SHORT_BLOCK};
 
 // ---------------------------------------------------------------------------
