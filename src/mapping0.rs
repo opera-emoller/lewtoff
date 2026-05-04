@@ -63,7 +63,6 @@ pub(crate) struct BlockMode {
 /// `mapping0_forward`.
 pub(crate) struct MappingScratch {
     pub gmdct: Vec<Vec<f32>>,
-    pub gmdct_work: Vec<Vec<f32>>,
     pub logfft: Vec<Vec<f32>>,
     pub local_ampmax: Vec<f32>,
     pub logmdct: Vec<f32>,
@@ -81,7 +80,6 @@ impl MappingScratch {
         let make_vv_i32 = || (0..channels).map(|_| vec![0i32; LONG_HALF]).collect();
         Self {
             gmdct: make_vv_f32(),
-            gmdct_work: make_vv_f32(),
             logfft: make_vv_f32(),
             local_ampmax: vec![0.0f32; channels],
             logmdct: vec![0.0f32; LONG_HALF],
@@ -120,7 +118,6 @@ pub(crate) fn mapping0_forward(
     // Reset scratch buffers (sized to LONG_HALF; touch only n2 worth).
     for c in 0..channels {
         scratch.gmdct[c][..n2].fill(0.0);
-        scratch.gmdct_work[c][..n2].fill(0.0);
         scratch.logfft[c][..n2].fill(0.0);
         scratch.noise_bufs[c][..n2].fill(0.0);
         scratch.tone_bufs[c][..n2].fill(0.0);
@@ -134,7 +131,6 @@ pub(crate) fn mapping0_forward(
     // Disjoint &mut borrows of scratch fields. Rust 2024's improved field
     // borrow analysis lets these be live simultaneously.
     let gmdct: &mut Vec<Vec<f32>> = &mut scratch.gmdct;
-    let gmdct_work: &mut Vec<Vec<f32>> = &mut scratch.gmdct_work;
     let logfft: &mut Vec<Vec<f32>> = &mut scratch.logfft;
     let local_ampmax: &mut Vec<f32> = &mut scratch.local_ampmax;
     let scratch_logmdct: &mut Vec<f32> = &mut scratch.logmdct;
@@ -282,34 +278,35 @@ pub(crate) fn mapping0_forward(
 
     // Noise + tone masking per channel, then floor1 fit
     // Port of: lines 362-576 in mapping0.c (minus bitrate management, we use offset_select=1 only)
-    // gmdct_work gets mutated by vp_offset_and_mix and vp_couple_quantize_normalize
-    // — copy gmdct into it. (Both buffers live in `scratch`.)
-    for c in 0..channels {
-        gmdct_work[c][..n2].copy_from_slice(&gmdct[c][..n2]);
-    }
+    // We mutate gmdct in place (vp_offset_and_mix + vp_couple_quantize_normalize);
+    // logmdct is recomputed each channel from the gmdct read BEFORE mutation,
+    // so we don't need a separate gmdct_work copy.
 
     for i in 0..channels {
         let submap = mapping.chmuxlist[i];
 
-        let logmdct: Vec<f32> = gmdct_work[i]
-            .iter()
-            .map(|&v| to_db(v.abs()) + 0.345_f32)
-            .collect();
+        // Compute logmdct in-place into scratch (per-channel; reused across channels).
+        let logmdct = &mut scratch_logmdct[..n2];
+        for j in 0..n2 {
+            logmdct[j] = to_db(gmdct[i][j].abs()) + 0.345_f32;
+        }
+        let logmdct = &*logmdct; // immutable view downstream
         if crate::debug_flag!("LW_DEBUG_MDCT_RAW") {
             for &b in &[14usize, 186, 220, 260, 312, 372, 490] {
                 if b < n2 {
                     eprintln!(
                         "LW_MDCT_RAW ch={} n={} bin={}: gmdct={:.10e} logmdct={:.4}",
-                        i, n, b, gmdct_work[i][b], logmdct[b]
+                        i, n, b, gmdct[i][b], logmdct[b]
                     );
                 }
             }
         }
 
-        let mut logmask = vec![0.0f32; n2];
+        let logmask = &mut scratch_logmask[..n2];
+        logmask.fill(0.0);
 
         // Noise mask
-        vp_noisemask(psy_look, &logmdct, &mut noise_bufs[i]);
+        vp_noisemask(psy_look, logmdct, &mut noise_bufs[i]);
 
         if crate::debug_flag!("LW_DEBUG_NOISE220") && n == LONG_BLOCK && i == 0 {
             use std::sync::atomic::{AtomicUsize, Ordering};
@@ -317,7 +314,7 @@ pub(crate) fn mapping0_forward(
             let idx = N.fetch_add(1, Ordering::Relaxed);
             if idx == 4 {
                 let mut bytes = Vec::with_capacity(n2 * 4);
-                for v in &logmdct {
+                for v in logmdct.iter() {
                     bytes.extend_from_slice(&v.to_le_bytes());
                 }
                 std::fs::write("/tmp/r_logmdct_blk11.bin", &bytes).ok();
@@ -373,15 +370,16 @@ pub(crate) fn mapping0_forward(
                 let _ = std::fs::write("/tmp/lewtoff-debug/r_noiseoffset_1.bin", &obytes);
             }
         }
-        // Offset + mix (offset_select=1 = nominal, not bitrate managed)
+        // Offset + mix (offset_select=1 = nominal, not bitrate managed).
+        // gmdct[i] is mutated in place; later read by vp_couple_quantize_normalize.
         vp_offset_and_mix(
             psy_look,
-            &noise_bufs[i].clone(),
-            &tone_bufs[i].clone(),
+            &noise_bufs[i],
+            &tone_bufs[i],
             1,
-            &mut logmask,
-            &mut gmdct_work[i],
-            &logmdct,
+            logmask,
+            gmdct[i].as_mut_slice(),
+            logmdct,
         );
 
         // floor1_fit
@@ -415,9 +413,9 @@ pub(crate) fn mapping0_forward(
             }
         }
         if do_dump && i == 0 {
-            dd::write_f32_bin("/tmp/lewtoff-debug/r_mask.bin", &logmask);
+            dd::write_f32_bin("/tmp/lewtoff-debug/r_mask.bin", logmask);
         }
-        floor_posts[i] = floor1_fit(floor_state, &logmdct, &logmask);
+        floor_posts[i] = floor1_fit(floor_state, logmdct, logmask);
         if do_dump && i == 0 {
             if let Some(ref posts) = floor_posts[i] {
                 dd::write_i32_bin("/tmp/lewtoff-debug/r_floor_posts.bin", posts);
@@ -491,7 +489,7 @@ pub(crate) fn mapping0_forward(
         gi,
         psy_look,
         &mapping.vp_mapping,
-        gmdct_work.as_mut_slice(),
+        gmdct.as_mut_slice(),
         iwork.as_mut_slice(),
         nonzero.as_mut_slice(),
         sliding_lowpass,
