@@ -58,15 +58,23 @@ corpus limit="":
     CORPUS_LIMIT={{limit}} cargo nextest run --features oracle --no-tests=warn \
         --run-ignored=only -E 'test(corpus_parity_sweep)'
 
-# Encode-throughput benchmark vs ffmpeg+libvorbis using hyperfine.
-# Decodes <input> once to s16le 44.1kHz stereo, then times both encoders
-# end-to-end (stdin → ogg on stdout, dropped to /dev/null).
+# Encode-throughput benchmark vs libvorbis (oggenc from vorbis-tools) using
+# hyperfine. Decodes <input> once to s16le 44.1kHz stereo, then times both
+# encoders end-to-end (stdin → ogg on stdout, dropped to /dev/null).
 #
 #     just bench                          # uses corpus/beach_bro/snd_neon_nights.mp3
 #     just bench corpus/path/to/file.wav  # use a specific file
 bench input="corpus/beach_bro/snd_neon_nights.mp3":
     #!/usr/bin/env bash
     set -euo pipefail
+    if ! command -v hyperfine >/dev/null 2>&1; then
+        echo "hyperfine not on PATH — install it via \`brew install hyperfine\` (macOS) or \`cargo install hyperfine\`" >&2
+        exit 2
+    fi
+    if ! command -v oggenc >/dev/null 2>&1; then
+        echo "oggenc not on PATH — install it via \`brew install vorbis-tools\` (macOS) or \`apt install vorbis-tools\` (Debian/Ubuntu)" >&2
+        exit 2
+    fi
     : ${TMPDIR:=/tmp/}
     PCM="${TMPDIR%/}/lewtoff-bench.s16le"
     if [ ! -f "{{input}}" ]; then
@@ -86,8 +94,8 @@ bench input="corpus/beach_bro/snd_neon_nights.mp3":
     hyperfine --warmup 1 \
         --command-name 'lewtoff' \
         "$LWBIN 44100 stereo < $PCM > /dev/null" \
-        --command-name 'ffmpeg+libvorbis' \
-        "ffmpeg -hide_banner -loglevel error -f s16le -ar 44100 -ac 2 -i - -c:a libvorbis -q:a 5 -f ogg - < $PCM > /dev/null"
+        --command-name 'oggenc (libvorbis)' \
+        "oggenc -Q -q 5 -R 44100 -B 16 -C 2 --raw - -o - < $PCM > /dev/null"
 
 # Per-chunk diff helper for parity failures.
 # Usage: just parity-diff input.s16le 44100 mono
