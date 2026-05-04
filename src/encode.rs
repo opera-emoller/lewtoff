@@ -656,8 +656,8 @@ pub(crate) fn pre_extrap_for_test(pcm: &[f32]) -> [f32; CENTER_W] {
     preextrapolate_channel(pcm)
 }
 
-#[doc(hidden)]
-pub fn post_extrap_for_test(pcm: &[f32]) -> Vec<f32> {
+#[cfg(test)]
+pub(crate) fn post_extrap_for_test(pcm: &[f32]) -> Vec<f32> {
     postextrapolate_channel(pcm)
 }
 

@@ -93,13 +93,3 @@ pub fn encode_with_serial_and_meta(
 ) -> Vec<u8> {
     crate::encode::encode_with_serial_and_meta(samples, rate, channels, serial, vendor, encoder_tag)
 }
-
-#[doc(hidden)]
-pub fn post_extrap_for_test(pcm: &[f32]) -> Vec<f32> {
-    crate::encode::post_extrap_for_test(pcm)
-}
-
-#[doc(hidden)]
-pub fn lpc_from_data_for_test(data: &[f32], lpc: &mut [f32], n: usize, m: usize) -> f32 {
-    crate::lpc::lpc_from_data(data, lpc, n, m)
-}

@@ -4,3 +4,18 @@
 /oracle-cache
 /tests/fixtures/oracle-out/*.ogg
 !/tests/fixtures/oracle-out/.keep
+
+# Audio test corpus is too large/licence-heavy to commit. Each contributor
+# stages their own files under /sounds and runs corpus_parity_44_stereo
+# manually.
+/sounds/
+
+# Ad-hoc debug binaries built from tools/debug-libvorbis-dump and
+# tools/oracle-encoder. Only `harness` (and its .dSYM) is intentionally
+# tracked because it's the canonical sine-440 dumper.
+/tools/debug-libvorbis-dump/corpus_harness
+/tools/debug-libvorbis-dump/corpus_harness.dSYM/
+/tools/debug-libvorbis-dump/ramp_harness
+/tools/debug-libvorbis-dump/ramp_harness.dSYM/
+/tools/oracle-encoder/dump_window_tables
+/tools/oracle-encoder/dump_window_tables.dSYM/
