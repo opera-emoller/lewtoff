@@ -1368,7 +1368,9 @@ fn noise_normalize(
         }
     }
 
-    let mut sort_idx: Vec<usize> = Vec::new();
+    // Stack-allocated sort scratch — partition <= MAX_PARTITION = 32.
+    let mut sort_buf = [0usize; MAX_PARTITION];
+    let mut sort_len = 0usize;
 
     for j in start..n {
         let skip = if let Some(fl) = flags {
@@ -1380,7 +1382,8 @@ fn noise_normalize(
             let ve = q[j] / f[j];
             if ve < 0.25 && (flags.is_none() || j as i32 >= limit - i) {
                 acc += ve;
-                sort_idx.push(j);
+                sort_buf[sort_len] = j;
+                sort_len += 1;
             } else {
                 let s = (ve as f64).sqrt().round_ties_even();
                 out[j] = if r[j] < 0.0 { -(s as i32) } else { s as i32 };
@@ -1389,13 +1392,14 @@ fn noise_normalize(
         }
     }
 
-    if !sort_idx.is_empty() {
+    if sort_len > 0 {
+        let sort_idx = &mut sort_buf[..sort_len];
         sort_idx.sort_unstable_by(|&a, &b| {
             let fa = q[a];
             let fb = q[b];
             fb.partial_cmp(&fa).unwrap_or(std::cmp::Ordering::Equal)
         });
-        for &k in &sort_idx {
+        for &k in sort_idx.iter() {
             if acc >= vi.normal_thresh as f32 {
                 out[k] = unitnorm(r[k]) as i32;
                 acc -= 1.0;
@@ -1503,8 +1507,6 @@ pub fn vp_couple_quantize_normalize(
                     }
                     floor_v[k][j] *= floor_v[k][j];
                 }
-                // collect iout into a local slice for noise_normalize
-                let mut out_slice: Vec<i32> = iout.to_vec();
                 acc[track] = noise_normalize(
                     p,
                     limit,
@@ -1515,9 +1517,8 @@ pub fn vp_couple_quantize_normalize(
                     acc[track],
                     i as i32,
                     jn,
-                    &mut out_slice,
+                    iout,
                 );
-                iout.copy_from_slice(&out_slice);
             } else {
                 for j in 0..jn {
                     floor_v[k][j] = 1e-10;
@@ -1589,22 +1590,18 @@ pub fn vp_couple_quantize_normalize(
                     floor_v[ai][j] = floor_v[mi][j]; // both point to same sum now
                 }
 
-                {
-                    let mut im_out: Vec<i32> = iwork[mi][i..i + jn].to_vec();
-                    acc[track] = noise_normalize(
-                        p,
-                        limit,
-                        &raw[mi][..jn],
-                        &mut quant[mi][..jn],
-                        &floor_v[mi][..jn],
-                        Some(&flag[mi][..jn]),
-                        acc[track],
-                        i as i32,
-                        jn,
-                        &mut im_out,
-                    );
-                    iwork[mi][i..i + jn].copy_from_slice(&im_out);
-                }
+                acc[track] = noise_normalize(
+                    p,
+                    limit,
+                    &raw[mi][..jn],
+                    &mut quant[mi][..jn],
+                    &floor_v[mi][..jn],
+                    Some(&flag[mi][..jn]),
+                    acc[track],
+                    i as i32,
+                    jn,
+                    &mut iwork[mi][i..i + jn],
+                );
                 track += 1;
             }
         }
