@@ -17,22 +17,35 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-nextest
-      - name: Install ffmpeg + libogg-dev (oracle build deps)
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg libogg-dev
+      - name: Install ffmpeg + vorbis-tools + libogg-dev
+        # ffmpeg: corpus_sweep decodes audio inputs to s16le PCM.
+        # vorbis-tools: provides `oggenc`, the parity oracle for
+        #   tests/parity.rs (replaces ffmpeg's libvorbis encoder, which
+        #   newer ffmpeg builds may omit).
+        # libogg-dev: linker dep for tools/oracle-encoder/build.sh, which
+        #   statically compiles our vendored libvorbis 1.3.7 sources.
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg vorbis-tools libogg-dev
       - name: Verify libvorbis version
         run: |
-          # ffmpeg's libvorbis link is informational only — oracle-encoder
-          # statically links our vendored 1.3.7 sources. We still pin the
-          # system version for repeatability of ffmpeg's pcm decode.
+          # vorbis-tools (oggenc) and ffmpeg both dynamically link the
+          # system libvorbis. parity_silence_* tests are sensitive to the
+          # 1.3.x branch; tone-rich inputs (sine/ramp) are intentionally
+          # ignored because release-built libvorbis may use FMA. The
+          # oracle-encoder vendored at tools/debug-libvorbis-dump/ is
+          # the source-of-truth oracle and always 1.3.7.
           dpkg-query -W -f='${Version}\n' libvorbis0a 2>/dev/null | grep -E "^1\.3" \
             || { echo "Wrong libvorbis version — parity tests pin to 1.3.x"; exit 1; }
       - name: Build oracle-encoder from vendored libvorbis sources
         run: ./tools/oracle-encoder/build.sh
       - run: cargo fmt --all -- --check
       - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo clippy --all-targets --features parallel -- -D warnings
       - run: cargo nextest run --status-level=fail --no-tests=warn
-      - name: Oracle parity (Linux glibc libm path)
+      - run: cargo nextest run --status-level=fail --no-tests=warn --features parallel
+      - name: Oracle parity, serial path (Linux glibc libm)
         run: cargo nextest run --features oracle --no-tests=fail parity_
+      - name: Oracle parity, parallel path
+        run: cargo nextest run --features oracle,parallel --no-tests=fail parity_
 
   wasm:
     runs-on: ubuntu-latest
