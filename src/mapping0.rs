@@ -93,6 +93,59 @@ impl MappingScratch {
     }
 }
 
+/// Standalone equivalent of the FFT+local_ampmax slice of
+/// `mapping0_forward`'s first per-channel loop. Returns the max over
+/// channels of clamped local_ampmax, used by the parallel encode path
+/// (`encode.rs` under `feature = "parallel"`) to compute each block's
+/// starting ampmax in a sequential pre-pass.
+#[cfg(feature = "parallel")]
+pub(crate) fn compute_block_local_ampmax_max(pcm_blocks: &[Vec<f32>], is_long: bool) -> f32 {
+    let n = if is_long { LONG_BLOCK } else { SHORT_BLOCK };
+    let scale = 4.0f32 / n as f32;
+    let scale_db = to_db(scale) + 0.345_f32;
+    let mut max_local = f32::NEG_INFINITY;
+    for ch_pcm in pcm_blocks {
+        let mut local = if is_long {
+            let mut fft_buf = [0.0f32; LONG_BLOCK];
+            fft_buf.copy_from_slice(ch_pcm);
+            drft_forward_long(&mut fft_buf);
+            let mut local = scale_db + to_db(fft_buf[0]) + 0.345_f32;
+            let mut j = 1usize;
+            while j < n - 1 {
+                let temp = fft_buf[j] * fft_buf[j] + fft_buf[j + 1] * fft_buf[j + 1];
+                let t = scale_db + 0.5_f32 * to_db(temp) + 0.345_f32;
+                if t > local {
+                    local = t;
+                }
+                j += 2;
+            }
+            local
+        } else {
+            let mut fft_buf = [0.0f32; SHORT_BLOCK];
+            fft_buf.copy_from_slice(ch_pcm);
+            drft_forward_short(&mut fft_buf);
+            let mut local = scale_db + to_db(fft_buf[0]) + 0.345_f32;
+            let mut j = 1usize;
+            while j < n - 1 {
+                let temp = fft_buf[j] * fft_buf[j] + fft_buf[j + 1] * fft_buf[j + 1];
+                let t = scale_db + 0.5_f32 * to_db(temp) + 0.345_f32;
+                if t > local {
+                    local = t;
+                }
+                j += 2;
+            }
+            local
+        };
+        if local > 0.0 {
+            local = 0.0;
+        }
+        if local > max_local {
+            max_local = local;
+        }
+    }
+    max_local
+}
+
 pub(crate) fn mapping0_forward(
     pcm_blocks: &[Vec<f32>], // per-channel windowed PCM, variable length (256 or 2048)
     psy_look: &VorbisLookPsy,

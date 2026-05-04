@@ -956,11 +956,6 @@ pub(crate) fn encode_with_serial_and_meta(
     // Windowing buffers per channel
     let mut win_bufs: Vec<WindowingBuffer> = (0..ch).map(|_| WindowingBuffer::new()).collect();
 
-    // Per-block scratch reused across the per-block loop. Allocates once
-    // to LONG_HALF capacity for each per-channel buffer; mapping0_forward
-    // resets and slices to the current block's n2 per call.
-    let mut mapping_scratch = mapping0::MappingScratch::new(ch);
-
     // Pre-stream LPC extrapolation (port of libvorbis _preextrapolate_helper).
     // Fill in virtual samples before the stream start so the first short block's
     // left half contains LPC-predicted continuations instead of zeros.
@@ -1012,17 +1007,49 @@ pub(crate) fn encode_with_serial_and_meta(
         .map(|c| postextrapolate_channel_with_n(&pcm_channels[c], n_train_post))
         .collect();
 
-    // Mutable floor states (mapping0_forward needs &mut)
-    let mut floor_states: Vec<crate::floor1::Floor1State> = setup
+    // Per-block analysis state. Under `feature = "parallel"`, blocks are
+    // collected into a Vec<BlockJob> and processed via Rayon; under default
+    // (serial) features, mapping0_forward is called inline with mutable
+    // floor_states/ampmax/scratch accumulating across blocks.
+    #[cfg(feature = "parallel")]
+    let floor_states_seed: Vec<crate::floor1::Floor1State> = setup
         .floor_states
         .iter()
         .map(|s| crate::floor1::floor1_look(s.vi.clone()))
         .collect();
 
+    #[cfg(not(feature = "parallel"))]
+    let mut floor_states: Vec<crate::floor1::Floor1State> = setup
+        .floor_states
+        .iter()
+        .map(|s| crate::floor1::floor1_look(s.vi.clone()))
+        .collect();
+    #[cfg(not(feature = "parallel"))]
     let mut ampmax = -9999.0f32;
+    #[cfg(not(feature = "parallel"))]
+    let mut mapping_scratch = mapping0::MappingScratch::new(ch);
 
     // Cumulative decoded samples (for granule position)
     let mut cumulative_granule: u64 = 0;
+
+    #[cfg(feature = "parallel")]
+    enum PsyLookId {
+        Short,
+        Padding,
+        Long,
+        Transition,
+    }
+    #[cfg(feature = "parallel")]
+    struct BlockJob {
+        windowed_blocks: Vec<Vec<f32>>,
+        block_mode: BlockMode,
+        granule_pos: u64,
+        is_last: bool,
+        psy_look_id: PsyLookId,
+        is_long: bool,
+    }
+    #[cfg(feature = "parallel")]
+    let mut jobs: Vec<BlockJob> = Vec::with_capacity(total_blocks);
 
     for block_idx in 0..total_blocks {
         let cur_w = block_w[block_idx];
@@ -1188,45 +1215,148 @@ pub(crate) fn encode_with_serial_and_meta(
             cumulative_granule += movement_w;
         }
 
-        let mapping = if is_short {
-            short_mapping
-        } else {
-            long_mapping
-        };
         // libvorbis: BLOCKTYPE_IMPULSE (psy[0]) when short block has an
         // envelope mark in its neighborhood; BLOCKTYPE_PADDING (psy[1])
         // otherwise. BLOCKTYPE_TRANSITION (psy[2]) when long block has !lW
         // or !nW; BLOCKTYPE_LONG (psy[3]) only when both lW and nW are long.
-        let psy_look = if is_short {
-            if block_is_impulse[block_idx] {
-                &psy_look_short
+        #[cfg(not(feature = "parallel"))]
+        {
+            let psy_look = if is_short {
+                if block_is_impulse[block_idx] {
+                    &psy_look_short
+                } else {
+                    &psy_look_padding
+                }
+            } else if block_mode.prev_window && block_mode.next_window {
+                &psy_look_long
             } else {
-                &psy_look_padding
-            }
-        } else if block_mode.prev_window && block_mode.next_window {
-            &psy_look_long
-        } else {
-            &psy_look_transition
-        };
+                &psy_look_transition
+            };
+            let mapping = if is_short {
+                short_mapping
+            } else {
+                long_mapping
+            };
+            let mut w = BitWriter::new();
+            mapping0_forward(
+                &windowed_blocks,
+                psy_look,
+                &gi,
+                &mut ampmax,
+                &mut floor_states,
+                &setup.residue_types,
+                &setup.residue_setups,
+                &setup.residue_looks,
+                mapping,
+                &block_mode,
+                &setup.books,
+                &mut mapping_scratch,
+                &mut w,
+            );
+            let packet_bytes = w.into_bytes();
+            ogg.write_packet(&packet_bytes, granule_pos, is_last, false);
+        }
 
-        let mut w = BitWriter::new();
-        mapping0_forward(
-            &windowed_blocks,
-            psy_look,
-            &gi,
-            &mut ampmax,
-            &mut floor_states,
-            &setup.residue_types,
-            &setup.residue_setups,
-            &setup.residue_looks,
-            mapping,
-            &block_mode,
-            &setup.books,
-            &mut mapping_scratch,
-            &mut w,
-        );
-        let packet_bytes = w.into_bytes();
-        ogg.write_packet(&packet_bytes, granule_pos, is_last, false);
+        #[cfg(feature = "parallel")]
+        {
+            let psy_look_id = if is_short {
+                if block_is_impulse[block_idx] {
+                    PsyLookId::Short
+                } else {
+                    PsyLookId::Padding
+                }
+            } else if block_mode.prev_window && block_mode.next_window {
+                PsyLookId::Long
+            } else {
+                PsyLookId::Transition
+            };
+            jobs.push(BlockJob {
+                windowed_blocks,
+                block_mode,
+                granule_pos,
+                is_last,
+                psy_look_id,
+                is_long: !is_short,
+            });
+        }
+    }
+
+    #[cfg(feature = "parallel")]
+    {
+        use rayon::prelude::*;
+
+        // Pre-pass A (parallel): each block computes max_ch(clamped
+        // local_ampmax) by running just the FFT slice. (Caching gmdct/logfft
+        // into the main pass to avoid the redundant work was tried and
+        // proved a wash — ~90MB of cache pressure ate the FFT savings.)
+        let max_local_per_block: Vec<f32> = jobs
+            .par_iter()
+            .map(|job| mapping0::compute_block_local_ampmax_max(&job.windowed_blocks, job.is_long))
+            .collect();
+
+        // Pre-pass B (sequential): chain the recurrence
+        //     decayed[i] = vp_ampmax_decay(prev[i], n2_i, rate)
+        //     ending[i]  = max(decayed[i], max_local[i])
+        //     prev[i+1]  = ending[i]
+        // to recover the input ampmax mapping0_forward would see in serial.
+        let mut input_ampmax_per_block: Vec<f32> = Vec::with_capacity(jobs.len());
+        {
+            let mut prev = -9999.0f32;
+            for (job, max_local) in jobs.iter().zip(max_local_per_block.iter()) {
+                input_ampmax_per_block.push(prev);
+                let n2 = if job.is_long { LONG_HALF } else { SHORT_HALF };
+                let decayed = crate::psy::vp_ampmax_decay(prev, &gi, n2, rate_hz);
+                prev = decayed.max(*max_local);
+            }
+        }
+
+        // Main pass (parallel): each block runs mapping0_forward against
+        // a thread-local MappingScratch and floor_states. Floor1 stats
+        // (phrasebits/postbits/frames) are instrumentation only — they
+        // accumulate per-thread but don't affect packet bytes.
+        let packets: Vec<Vec<u8>> = jobs
+            .par_iter()
+            .zip(input_ampmax_per_block.par_iter())
+            .map_init(
+                || (mapping0::MappingScratch::new(ch), floor_states_seed.clone()),
+                |(scratch, floor_states_local), (job, input_ampmax)| {
+                    let psy_look = match job.psy_look_id {
+                        PsyLookId::Short => &psy_look_short,
+                        PsyLookId::Padding => &psy_look_padding,
+                        PsyLookId::Long => &psy_look_long,
+                        PsyLookId::Transition => &psy_look_transition,
+                    };
+                    let mapping = if job.is_long {
+                        long_mapping
+                    } else {
+                        short_mapping
+                    };
+                    let mut ampmax_local = *input_ampmax;
+                    let mut w = BitWriter::new();
+                    mapping0_forward(
+                        &job.windowed_blocks,
+                        psy_look,
+                        &gi,
+                        &mut ampmax_local,
+                        floor_states_local,
+                        &setup.residue_types,
+                        &setup.residue_setups,
+                        &setup.residue_looks,
+                        mapping,
+                        &job.block_mode,
+                        &setup.books,
+                        scratch,
+                        &mut w,
+                    );
+                    w.into_bytes()
+                },
+            )
+            .collect();
+
+        // Sequential packet emission preserves Ogg page ordering.
+        for (job, packet) in jobs.iter().zip(packets.iter()) {
+            ogg.write_packet(packet, job.granule_pos, job.is_last, false);
+        }
     }
 
     ogg.into_bytes()

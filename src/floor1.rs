@@ -56,6 +56,7 @@ pub(crate) struct Floor1Setup {
 // Floor1State — mirrors vorbis_look_floor1
 // ---------------------------------------------------------------------------
 
+#[derive(Clone)]
 pub(crate) struct Floor1State {
     pub sorted_index: [i32; VIF_POSIT + 2],
     pub forward_index: [i32; VIF_POSIT + 2],

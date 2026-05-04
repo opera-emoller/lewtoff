@@ -14,13 +14,19 @@ keywords = ["vorbis", "ogg", "audio", "encoder", "lossy"]
 
 [features]
 default = []
-# Enables the parity tests under tests/parity.rs. Requires `ffmpeg` on PATH
-# with libvorbis 1.3.7. Off by default so contributors without ffmpeg can
+# Enables the parity tests under tests/parity.rs. Requires `oggenc`
+# (vorbis-tools) on PATH. Off by default so contributors without it can
 # still run the bulk of the suite locally.
 oracle = []
+# Enables block-level encode parallelism via Rayon. Adds rayon (and its
+# crossbeam transitive deps) to the build. Off by default to keep the
+# library lean and WASM-friendly. When on, public API is unchanged but
+# encode() fans out per-block analysis across the global Rayon pool.
+parallel = ["dep:rayon"]
 
 [dependencies]
 ogg = "0.9"
+rayon = { version = "1.10", optional = true }
 
 [dev-dependencies]
 lewton = "0.10"

@@ -8,5 +8,8 @@ publish = false
 name = "lewtoff"
 path = "src/main.rs"
 
+[features]
+parallel = ["lewtoff/parallel"]
+
 [dependencies]
 lewtoff = { path = "../.." }
