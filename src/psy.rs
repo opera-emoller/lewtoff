@@ -1093,14 +1093,7 @@ pub fn vp_noisemask(p: &VorbisLookPsy, logmdct: &[f32], logmask: &mut [f32]) {
         work[i] = logmdct[i] - logmask[i];
     }
 
-    bark_noise_hybridmp(
-        n,
-        &p.bark,
-        &work.clone(),
-        logmask,
-        0.0,
-        p.vi.noisewindowfixed,
-    );
+    bark_noise_hybridmp(n, &p.bark, &work, logmask, 0.0, p.vi.noisewindowfixed);
 
     for i in 0..n {
         work[i] = logmdct[i] - work[i];

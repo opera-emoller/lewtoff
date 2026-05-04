@@ -303,7 +303,7 @@ fn drftf1(n: usize, c: &mut [f32], ch: &mut [f32], wa: &[f32], ifac: &[i32]) {
 
 pub(crate) fn drft_forward_long(data: &mut [f32; LONG_BLOCK]) {
     let n = LONG_BLOCK;
-    let mut ch = vec![0.0f32; n];
+    let mut ch = [0.0f32; LONG_BLOCK];
     // trigcache layout: [0..n unused zeros][n..3n = wa used by drftf1]
     // drft_forward passes trigcache+n as wa, which is DRFT_TRIG_2048[n..]
     let wa = &DRFT_TRIG_2048[n..];
@@ -312,7 +312,7 @@ pub(crate) fn drft_forward_long(data: &mut [f32; LONG_BLOCK]) {
 
 pub(crate) fn drft_forward_short(data: &mut [f32; SHORT_BLOCK]) {
     let n = SHORT_BLOCK;
-    let mut ch = vec![0.0f32; n];
+    let mut ch = [0.0f32; SHORT_BLOCK];
     let wa = &DRFT_TRIG_256[n..];
     drftf1(n, data.as_mut_slice(), &mut ch, wa, &DRFT_SPLIT_256);
 }

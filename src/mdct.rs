@@ -341,7 +341,11 @@ fn mdct_forward_generic(
     let n4 = n / 4;
     let n8 = n / 8;
 
-    let mut w = vec![0f32; n];
+    // Stack-allocated scratch (n <= N=2048). Avoids per-call heap alloc;
+    // wastes some stack for short / envelope MDCTs but the absolute sizes
+    // are small.
+    let mut w_storage = [0f32; N];
+    let w = &mut w_storage[..n];
 
     let mut x0_idx: usize = n2 + n4;
     let mut x1_idx: usize = n2 + n4 + 1;
@@ -391,8 +395,8 @@ fn mdct_forward_generic(
         i += 2;
     }
 
-    mdct_butterflies_g(trig, log2n, &mut w, n2, n2);
-    mdct_bitreverse_g(trig, bitrev, n, &mut w);
+    mdct_butterflies_g(trig, log2n, w, n2, n2);
+    mdct_bitreverse_g(trig, bitrev, n, w);
 
     let mut t_idx: usize = n2;
     let mut w_idx: usize = 0;
