@@ -58,6 +58,37 @@ corpus limit="":
     CORPUS_LIMIT={{limit}} cargo nextest run --features oracle --no-tests=warn \
         --run-ignored=only -E 'test(corpus_parity_sweep)'
 
+# Encode-throughput benchmark vs ffmpeg+libvorbis using hyperfine.
+# Decodes <input> once to s16le 44.1kHz stereo, then times both encoders
+# end-to-end (stdin → ogg on stdout, dropped to /dev/null).
+#
+#     just bench                          # uses corpus/beach_bro/snd_neon_nights.mp3
+#     just bench corpus/path/to/file.wav  # use a specific file
+bench input="corpus/beach_bro/snd_neon_nights.mp3":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    : ${TMPDIR:=/tmp/}
+    PCM="${TMPDIR%/}/lewtoff-bench.s16le"
+    if [ ! -f "{{input}}" ]; then
+        echo "input not found: {{input}}" >&2
+        exit 2
+    fi
+    echo "decoding {{input}} → s16le 44100Hz stereo..."
+    ffmpeg -hide_banner -loglevel error -y -i "{{input}}" \
+        -f s16le -ar 44100 -ac 2 "$PCM"
+    SIZE=$(wc -c < "$PCM")
+    SAMPLES=$((SIZE / 4))
+    SECS=$(awk "BEGIN{printf \"%.2f\", $SAMPLES/44100}")
+    echo "input: $SAMPLES frames (${SECS}s of audio, $SIZE bytes raw)"
+    cargo build --release -q -p lewtoff-cli
+    LWBIN="$PWD/target/release/lewtoff"
+    echo
+    hyperfine --warmup 1 \
+        --command-name 'lewtoff' \
+        "$LWBIN 44100 stereo < $PCM > /dev/null" \
+        --command-name 'ffmpeg+libvorbis' \
+        "ffmpeg -hide_banner -loglevel error -f s16le -ar 44100 -ac 2 -i - -c:a libvorbis -q:a 5 -f ogg - < $PCM > /dev/null"
+
 # Per-chunk diff helper for parity failures.
 # Usage: just parity-diff input.s16le 44100 mono
 parity-diff input rate channels:

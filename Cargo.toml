@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "tools/gen-tables", "tools/gen-setup-blob", "tools/gen-header-vectors", "tools/parity-diff", "tools/debug-rust-dump", "tools/debug-diff"]
+members = [".", "tools/gen-tables", "tools/gen-setup-blob", "tools/gen-header-vectors", "tools/parity-diff", "tools/debug-rust-dump", "tools/debug-diff", "tools/lewtoff-cli"]
 
 [package]
 name = "lewtoff"

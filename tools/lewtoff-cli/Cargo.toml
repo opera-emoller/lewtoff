@@ -1,0 +1,12 @@
+[package]
+name = "lewtoff-cli"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "lewtoff"
+path = "src/main.rs"
+
+[dependencies]
+lewtoff = { path = "../.." }
