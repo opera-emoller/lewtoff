@@ -610,7 +610,7 @@ fn preextrapolate_channel(pcm: &[f32]) -> [f32; CENTER_W] {
     let mut lpc_coeffs = [0.0f32; LPC_ORDER];
     lpc_from_data(&work, &mut lpc_coeffs, n, LPC_ORDER);
 
-    if std::env::var("LW_DEBUG_LPC").is_ok() {
+    if crate::debug_flag!("LW_DEBUG_LPC") {
         let vals: Vec<String> = lpc_coeffs.iter().map(|v| format!("{:.10e}", v)).collect();
         eprintln!("LW_LPC_COEFFS: [{}]", vals.join(","));
     }
@@ -618,7 +618,7 @@ fn preextrapolate_channel(pcm: &[f32]) -> [f32; CENTER_W] {
     // Prime: work[n-LPC_ORDER..n] (the last LPC_ORDER reversed samples = first LPC_ORDER actual)
     let prime: Vec<f32> = work[n - LPC_ORDER..n].to_vec();
 
-    if std::env::var("LW_DEBUG_LPC").is_ok() {
+    if crate::debug_flag!("LW_DEBUG_LPC") {
         let vals: Vec<String> = prime.iter().map(|v| format!("{:.10e}", v)).collect();
         eprintln!("LW_LPC_PRIME: [{}]", vals.join(","));
     }
@@ -627,7 +627,7 @@ fn preextrapolate_channel(pcm: &[f32]) -> [f32; CENTER_W] {
     let mut predicted = vec![0.0f32; CENTER_W];
     lpc_predict(&lpc_coeffs, &prime, LPC_ORDER, &mut predicted, CENTER_W);
 
-    if std::env::var("LW_DEBUG_LPC").is_ok() {
+    if crate::debug_flag!("LW_DEBUG_LPC") {
         let vals: Vec<String> = predicted[..8]
             .iter()
             .map(|v| format!("{:.10e}", v))
@@ -924,7 +924,7 @@ pub(crate) fn encode_with_serial_and_meta(
         .collect();
     let total_blocks = block_w.len();
 
-    if std::env::var("LW_DEBUG_BLOCKW").is_ok() {
+    if crate::debug_flag!("LW_DEBUG_BLOCKW") {
         let mut s = String::from("R_BLOCKW: [");
         for (i, &w) in block_w.iter().enumerate() {
             if i > 0 {
@@ -1004,7 +1004,7 @@ pub(crate) fn encode_with_serial_and_meta(
     let eofflag_lpc =
         crate::envelope::simulate_eofflag(&env_marks, total_samples as i64, 64) as usize;
     let n_train_post = LONG_BLOCK.min(eofflag_lpc);
-    if std::env::var("LW_DEBUG_EOFFLAG").is_ok() {
+    if crate::debug_flag!("LW_DEBUG_EOFFLAG") {
         eprintln!(
             "R_EOFFLAG eofflag_lpc={} n_train={} total_samples={}",
             eofflag_lpc, n_train_post, total_samples

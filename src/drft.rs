@@ -211,7 +211,7 @@ fn drftf1(n: usize, c: &mut [f32], ch: &mut [f32], wa: &[f32], ifac: &[i32]) {
     let mut iw = n;
 
     // Debug dump: input to drftf1 (first call only).
-    if std::env::var("LEWTOFF_DEBUG_DUMP").is_ok() {
+    if crate::debug_dump::dump_enabled() {
         use std::sync::atomic::{AtomicBool, Ordering};
         static FIRED: AtomicBool = AtomicBool::new(false);
         if !FIRED.swap(true, Ordering::Relaxed) {
@@ -261,7 +261,7 @@ fn drftf1(n: usize, c: &mut [f32], ch: &mut [f32], wa: &[f32], ifac: &[i32]) {
                     &wa[ix3 - 1..],
                 );
             }
-            if std::env::var("LEWTOFF_DEBUG_DUMP").is_ok() {
+            if crate::debug_dump::dump_enabled() {
                 use std::sync::atomic::{AtomicUsize, Ordering};
                 static ITER: AtomicUsize = AtomicUsize::new(0);
                 let iter = ITER.fetch_add(1, Ordering::Relaxed);

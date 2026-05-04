@@ -230,7 +230,7 @@ pub(crate) fn residue_look(info: &ResidueSetup, books: &[Codebook]) -> ResidueLo
 // ---------------------------------------------------------------------------
 
 fn local_book_besterror(book: &Codebook, a: &mut [i32]) -> i32 {
-    let dbg_enabled = std::env::var("LW_DEBUG_BESTERR").is_ok();
+    let dbg_enabled = crate::debug_flag!("LW_DEBUG_BESTERR");
     let dbg_n = if dbg_enabled {
         use std::sync::atomic::{AtomicUsize, Ordering};
         static N: AtomicUsize = AtomicUsize::new(0);
@@ -359,7 +359,7 @@ fn _encodepart(opb: &mut BitWriter, vec: &mut [i32], n: usize, book: &Codebook) 
     let dim = book.dim;
     let step = n / dim;
 
-    let dbg = std::env::var("LW_DEBUG_BESTERR2").is_ok();
+    let dbg = crate::debug_flag!("LW_DEBUG_BESTERR2");
 
     for i in 0..step {
         let mut vec_in_copy = [0i32; 64];
@@ -429,7 +429,7 @@ pub(crate) fn _01class(
     // C: float scale = 100. / samples_per_partition;  (computed in f64, cast to f32).
     // Then `ent *= scale` is int*float in f32. Match exactly.
     let scale: f32 = (100.0_f64 / samples_per_partition as f64) as f32;
-    if std::env::var("LW_DEBUG_RES").is_ok() {
+    if crate::debug_flag!("LW_DEBUG_RES") {
         use std::sync::atomic::{AtomicUsize, Ordering};
         static N: AtomicUsize = AtomicUsize::new(0);
         let _n = N.fetch_add(1, Ordering::Relaxed);
@@ -517,7 +517,7 @@ pub(crate) fn _2class(
     let n = (info.end - info.begin) as usize;
 
     let partvals = n / samples_per_partition;
-    let dbg_part = std::env::var("LW_DEBUG_PARTWORD").is_ok();
+    let dbg_part = crate::debug_flag!("LW_DEBUG_PARTWORD");
     if dbg_part {
         eprintln!(
             "R_2CLASS_IN partvals={} cm1={:?} cm2={:?}",
@@ -827,7 +827,7 @@ fn _01forward_indexed(
                         }
                     }
                     if val < look.phrasebook_entries as i64 {
-                        if std::env::var("LW_DEBUG_PHRASE").is_ok() {
+                        if crate::debug_flag!("LW_DEBUG_PHRASE") {
                             use std::sync::atomic::{AtomicUsize, Ordering};
                             static N: AtomicUsize = AtomicUsize::new(0);
                             let n = N.fetch_add(1, Ordering::Relaxed);

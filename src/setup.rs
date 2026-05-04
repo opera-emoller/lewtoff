@@ -150,7 +150,7 @@ pub(crate) fn unpack_q5_setup(
         // twofitweight: 1 for short floors, 3 for long floors
         setup.twofitweight = if postlist1 == 128 { 1.0 } else { 3.0 };
         setup.twofitatten = 18.0;
-        if std::env::var("LW_DEBUG_SETUP").is_ok() {
+        if crate::debug_flag!("LW_DEBUG_SETUP") {
             eprintln!(
                 "  floor: n={} postlist[1]={} partitions={}",
                 setup.n, setup.postlist[1], setup.partitions
@@ -158,7 +158,7 @@ pub(crate) fn unpack_q5_setup(
         }
         floor_setups.push(setup);
     }
-    if std::env::var("LW_DEBUG_SETUP").is_ok() {
+    if crate::debug_flag!("LW_DEBUG_SETUP") {
         eprintln!("floors_count={}", floors_count);
     }
 
@@ -253,7 +253,7 @@ pub(crate) fn unpack_q5_setup(
             return Err(SetupError::BadModeWindowtype);
         }
         let mapping_idx = r.read(8) as usize;
-        if std::env::var("LW_DEBUG_SETUP").is_ok() {
+        if crate::debug_flag!("LW_DEBUG_SETUP") {
             eprintln!("  mode: blockflag={} mapping={}", blockflag, mapping_idx);
         }
         modes.push(Mode {
@@ -332,7 +332,7 @@ fn unpack_mapping(
         residuesubmap[i] = rs;
     }
 
-    if std::env::var("LW_DEBUG_SETUP").is_ok() {
+    if crate::debug_flag!("LW_DEBUG_SETUP") {
         eprintln!(
             "  mapping: submaps={} floorsubmap={:?} residuesubmap={:?}",
             submaps, &floorsubmap, &residuesubmap

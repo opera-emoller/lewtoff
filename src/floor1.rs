@@ -12,9 +12,6 @@
 #![allow(clippy::excessive_precision)]
 #![allow(clippy::assign_op_pattern)]
 #![allow(non_snake_case)]
-#![allow(unused_mut)]
-#![allow(unused_variables)]
-#![allow(unused_assignments)]
 
 use crate::bitpack::{BitReader, BitWriter};
 use crate::codebook::Codebook;
@@ -340,7 +337,7 @@ pub(crate) fn render_line(n: i32, x0: i32, x1: i32, y0: i32, y1: i32, d: &mut [f
     let mut x = x0;
     let mut y = y0;
     let mut err: i32 = 0;
-    let mut ady = ady - (base * adx).abs();
+    let ady = ady - (base * adx).abs();
 
     let mut n = n;
     if n > x1 {
@@ -498,11 +495,15 @@ fn accumulate_fit(
 // fit_line — port of fit_line in floor1.c
 // ---------------------------------------------------------------------------
 
+// _y2b is accumulated to mirror the libvorbis structure but never read out
+// of this function (the C accumulator was used for an MSE diagnostic that's
+// dead in encode-only paths); kept for provenance via the leading underscore.
+#[allow(unused_assignments)]
 fn fit_line(a: &[LsfitAcc], fits: usize, y0: &mut i32, y1: &mut i32, info: &Floor1Setup) -> i32 {
     let mut xb: f64 = 0.0;
     let mut yb: f64 = 0.0;
     let mut x2b: f64 = 0.0;
-    let mut y2b: f64 = 0.0;
+    let mut _y2b: f64 = 0.0;
     let mut xyb: f64 = 0.0;
     let mut bn: f64 = 0.0;
 
@@ -521,12 +522,12 @@ fn fit_line(a: &[LsfitAcc], fits: usize, y0: &mut i32, y1: &mut i32, info: &Floo
         xb += a[i].xb as f64 + a[i].xa as f64 * weight;
         yb += a[i].yb as f64 + a[i].ya as f64 * weight;
         x2b += a[i].x2b as f64 + a[i].x2a as f64 * weight;
-        y2b += a[i].y2b as f64 + a[i].y2a as f64 * weight;
+        _y2b += a[i].y2b as f64 + a[i].y2a as f64 * weight;
         xyb += a[i].xyb as f64 + a[i].xya as f64 * weight;
         bn += a[i].bn as f64 + a[i].an as f64 * weight;
     }
 
-    if std::env::var("LW_DEBUG_FITLINE").is_ok() && fits >= 20 {
+    if crate::debug_flag!("LW_DEBUG_FITLINE") && fits >= 20 {
         eprintln!(
             "LW_FITLINE fits={} x0={} x1={}: xb={:.1} yb={:.1} x2b={:.1} xyb={:.1} bn={:.1}",
             fits, x0, x1, xb, yb, x2b, xyb, bn
@@ -537,7 +538,7 @@ fn fit_line(a: &[LsfitAcc], fits: usize, y0: &mut i32, y1: &mut i32, info: &Floo
         xb += x0 as f64;
         yb += *y0 as f64;
         x2b += (x0 * x0) as f64;
-        y2b += (*y0 * *y0) as f64;
+        _y2b += (*y0 * *y0) as f64;
         xyb += (*y0 * x0) as f64;
         bn += 1.0_f64;
     }
@@ -546,7 +547,7 @@ fn fit_line(a: &[LsfitAcc], fits: usize, y0: &mut i32, y1: &mut i32, info: &Floo
         xb += x1 as f64;
         yb += *y1 as f64;
         x2b += (x1 * x1) as f64;
-        y2b += (*y1 * *y1) as f64;
+        _y2b += (*y1 * *y1) as f64;
         xyb += (*y1 * x1) as f64;
         bn += 1.0_f64;
     }
@@ -607,13 +608,11 @@ fn inspect_error(
     let mut y = y0;
     let mut err: i32 = 0;
     let val = vorbis_dBquant(mask[x as usize]);
-    let mut mse: i32 = 0;
     let mut n: i32 = 0;
 
     let ady = ady - (base * adx).abs();
 
-    mse = y - val;
-    mse *= mse;
+    let mut mse = (y - val) * (y - val);
     n += 1;
     // C: `if(y+info->maxover<val)` — int + float < int promotes both sides to
     // float. For Q5 maxover/maxunder are integers (60/30) so the f32 path is
@@ -726,7 +725,7 @@ pub(crate) fn floor1_fit(look: &Floor1State, logmdct: &[f32], logmask: &[f32]) -
         let mut y1 = -200i32;
         fit_line(&fits, (posts - 1) as usize, &mut y0, &mut y1, info);
 
-        if std::env::var("LW_DEBUG_FLOOR1FIT").is_ok() {
+        if crate::debug_flag!("LW_DEBUG_FLOOR1FIT") {
             eprintln!("LW_FLOOR1FIT base: y0={} y1={} n={}", y0, y1, n);
         }
 
@@ -894,7 +893,7 @@ pub(crate) fn floor1_encode(
     books: &[Codebook],
     pcmend: usize,
 ) -> i32 {
-    let info = &look.vi.clone();
+    let info = &look.vi;
     let posts = look.posts;
 
     if let Some(post) = post {
@@ -973,7 +972,7 @@ pub(crate) fn floor1_encode(
             }
         }
 
-        if std::env::var("LW_DEBUG_FLOOR_PART").is_ok() {
+        if crate::debug_flag!("LW_DEBUG_FLOOR_PART") {
             use std::sync::atomic::{AtomicUsize, Ordering};
             static FIRED: AtomicUsize = AtomicUsize::new(0);
             let n = FIRED.fetch_add(1, Ordering::Relaxed);
@@ -1013,7 +1012,7 @@ pub(crate) fn floor1_encode(
             let mut cval: usize = 0;
             let mut cshift: usize = 0;
 
-            let part_dbg = std::env::var("LW_DEBUG_FLOOR_PART").is_ok();
+            let part_dbg = crate::debug_flag!("LW_DEBUG_FLOOR_PART");
             if part_dbg {
                 use std::sync::atomic::{AtomicUsize, Ordering};
                 static N: AtomicUsize = AtomicUsize::new(0);

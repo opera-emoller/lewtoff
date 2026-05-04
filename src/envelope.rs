@@ -90,7 +90,7 @@ impl EnvelopeLookup {
             let s = (i as f64 / (ENV_WINLENGTH - 1) as f64 * std::f64::consts::PI).sin() as f32;
             mdct_win[i] = s * s;
         }
-        if std::env::var("LW_DEBUG_MDCT_WIN").is_ok() {
+        if crate::debug_flag!("LW_DEBUG_MDCT_WIN") {
             for i in 0..8 {
                 eprintln!("R_MDCT_WIN[{}] = 0x{:08x}", i, mdct_win[i].to_bits());
             }
@@ -155,7 +155,7 @@ impl EnvelopeLookup {
         }
         let mut vec_in: [f32; ENV_WINLENGTH] = vec;
         let mut vec_out = [0.0f32; ENV_WINLENGTH / 2];
-        if std::env::var("LW_DEBUG_AMP_DBG").is_ok() {
+        if crate::debug_flag!("LW_DEBUG_AMP_DBG") {
             use std::sync::atomic::{AtomicUsize, Ordering};
             static N: AtomicUsize = AtomicUsize::new(0);
             let n = N.fetch_add(1, Ordering::Relaxed);
@@ -195,7 +195,7 @@ impl EnvelopeLookup {
             let term1 = 0.7_f64 * vec_out[1] as f64 * vec_out[1] as f64;
             let term2 = 0.2_f64 * vec_out[2] as f64 * vec_out[2] as f64;
             let temp = (term0 as f64 + term1 + term2) as f32;
-            if std::env::var("LW_DEBUG_NEARDC").is_ok() {
+            if crate::debug_flag!("LW_DEBUG_NEARDC") {
                 use std::sync::atomic::{AtomicUsize, Ordering};
                 static N: AtomicUsize = AtomicUsize::new(0);
                 let n = N.fetch_add(1, Ordering::Relaxed);
@@ -236,7 +236,7 @@ impl EnvelopeLookup {
             // promotes to double for the subtract; assignment to float
             // truncates. Mirror that promotion chain explicitly.
             let decay_db = (todb(decay_scaled) as f64 * 0.5_f64 - 15.0_f32 as f64) as f32;
-            if std::env::var("LW_DEBUG_DECAY").is_ok() {
+            if crate::debug_flag!("LW_DEBUG_DECAY") {
                 use std::sync::atomic::{AtomicUsize, Ordering};
                 static N: AtomicUsize = AtomicUsize::new(0);
                 let n = N.fetch_add(1, Ordering::Relaxed);
@@ -281,7 +281,7 @@ impl EnvelopeLookup {
             i += 2;
         }
 
-        if std::env::var("LW_DEBUG_SPREAD").is_ok() {
+        if crate::debug_flag!("LW_DEBUG_SPREAD") {
             use std::sync::atomic::{AtomicUsize, Ordering};
             static N: AtomicUsize = AtomicUsize::new(0);
             let n = N.fetch_add(1, Ordering::Relaxed);
@@ -345,7 +345,7 @@ impl EnvelopeLookup {
             if valmin < gi.postecho_thresh[j] - penalty {
                 ret |= 2;
             }
-            if std::env::var("LW_DEBUG_AMP").is_ok() {
+            if crate::debug_flag!("LW_DEBUG_AMP") {
                 use std::sync::atomic::{AtomicUsize, Ordering};
                 static N: AtomicUsize = AtomicUsize::new(0);
                 let n = N.fetch_add(1, Ordering::Relaxed);
@@ -414,7 +414,7 @@ pub fn compute_marks(pcm_channels: &[Vec<f32>], gi: &VorbisInfoPsyGlobal) -> Vec
     let n_steps = (n_samples / ENV_SEARCHSTEP).saturating_sub(VE_WIN);
     let mut marks = vec![false; n_steps + VE_POST + 1];
 
-    let dbg = std::env::var("LW_DEBUG_ENV").is_ok();
+    let dbg = crate::debug_flag!("LW_DEBUG_ENV");
     for j in 0..n_steps {
         let mut ret = 0i32;
         e.stretch += 1;

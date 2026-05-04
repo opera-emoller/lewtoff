@@ -318,7 +318,7 @@ fn setup_tone_curves(
         }
     }
 
-    if std::env::var("LEWTOFF_DEBUG_DUMP").is_ok() {
+    if crate::debug_dump::dump_enabled() {
         use std::sync::atomic::{AtomicBool, Ordering};
         static FIRED: AtomicBool = AtomicBool::new(false);
         if !FIRED.swap(true, Ordering::Relaxed) {
@@ -560,7 +560,7 @@ pub fn vp_psy_init(
 
             p.bark[i] = ((lo - 1) << 16) + (hi - 1);
 
-            if (10..=30).contains(&i) && std::env::var("LW_DEBUG_BARK").is_ok() {
+            if (10..=30).contains(&i) && crate::debug_flag!("LW_DEBUG_BARK") {
                 eprintln!("LW_BARK_INIT n={} i={}: lo={} hi={}", n, i, lo, hi);
             }
         }
@@ -574,7 +574,7 @@ pub fn vp_psy_init(
     }
 
     // tone curves
-    if std::env::var("LEWTOFF_DEBUG_DUMP").is_ok() {
+    if crate::debug_dump::dump_enabled() {
         use std::sync::atomic::{AtomicBool, Ordering};
         static FIRED: AtomicBool = AtomicBool::new(false);
         if !FIRED.swap(true, Ordering::Relaxed) {
@@ -588,7 +588,7 @@ pub fn vp_psy_init(
         vi.tone_centerboost,
         vi.tone_decay,
     );
-    if std::env::var("LEWTOFF_DEBUG_DUMP").is_ok() {
+    if crate::debug_dump::dump_enabled() {
         use std::sync::atomic::{AtomicBool, Ordering};
         static FIRED: AtomicBool = AtomicBool::new(false);
         if !FIRED.swap(true, Ordering::Relaxed) {
@@ -634,7 +634,7 @@ pub fn vp_psy_init(
         }
     }
 
-    if std::env::var("LEWTOFF_DEBUG_DUMP").is_ok() && n == 128 {
+    if crate::debug_dump::dump_enabled() && n == 128 {
         use std::sync::atomic::{AtomicBool, Ordering};
         static FIRED: AtomicBool = AtomicBool::new(false);
         if !FIRED.swap(true, Ordering::Relaxed) {
@@ -965,11 +965,11 @@ fn bark_noise_hybridmp(n: usize, b: &[i64], f: &[f32], noise: &mut [f32], offset
         big_d = tn * txx - tx * tx;
         r = (big_a + x * big_b) / big_d;
 
-        if (12..=16).contains(&i) && std::env::var("LW_DEBUG_BNH").is_ok() {
+        if (12..=16).contains(&i) && crate::debug_flag!("LW_DEBUG_BNH") {
             eprintln!("LW_BNH i={} lo={} hi={} x={:.1} tn={:.6} tx={:.6} txx={:.6} ty={:.6} txy={:.6} A={:.6} B={:.6} D={:.6} R={:.6} noise={:.6} offset={:.6}",
                 i, lo, hi, x, tn, tx, txx, ty, txy, big_a, big_b, big_d, r, r - offset, offset);
         }
-        if (i == 118 || i == 127) && std::env::var("LW_DEBUG_BNH118").is_ok() {
+        if (i == 118 || i == 127) && crate::debug_flag!("LW_DEBUG_BNH118") {
             eprintln!(
                 "LW_BNH i={} lo={} hi={} x={} tn={}(0x{:08x}) ty={}(0x{:08x}) txx={}(0x{:08x}) tx={}(0x{:08x}) txy={}(0x{:08x}) A={}(0x{:08x}) B={}(0x{:08x}) D={}(0x{:08x}) R={}(0x{:08x})",
                 i, lo, hi, x,
@@ -1137,7 +1137,7 @@ pub fn vp_tonemask(
     }
 
     seed_loop(p, &p.tonecurves, logfft, logmask, &mut seed, global_specmax);
-    if std::env::var("LEWTOFF_DEBUG_DUMP").is_ok() {
+    if crate::debug_dump::dump_enabled() {
         use std::sync::atomic::{AtomicBool, Ordering};
         static FIRED: AtomicBool = AtomicBool::new(false);
         if !FIRED.swap(true, Ordering::Relaxed) {

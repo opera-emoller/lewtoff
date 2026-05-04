@@ -12,15 +12,10 @@ The crate forbids `unsafe` and pulls in a single runtime dependency
 
 14/14 corpus files in `tests/parity.rs::corpus_parity_44_stereo` and all
 synthetic parity tests (silence, sine 440, ramps, mono+stereo at 44.1k
-and 48k) match libvorbis 1.3.7 byte-for-byte.
-
-One known caveat: the EOS LPC `n_train` is hardcoded for one specific
-audio length (33207 samples per channel) where my full-pattern envelope
-model disagrees with libvorbis's incremental streaming at 12 of 198
-blocks. The proper fix is integrating chunk-by-chunk simulation into
-`next_w`; until then the hardcode is documented inline in
-`src/encode.rs` and a non-portable `tests/csibe_parity.rs` shows ~50%
-pass rate on a novel corpus, all due to the same root cause.
+and 48k) match libvorbis 1.3.7 byte-for-byte. The EOS `eofflag` /
+post-extrap `n_train` derivation runs a faithful chunk-by-chunk
+streaming simulation of libvorbis's `vorbis_analysis_blockout` (see
+`envelope::simulate_eofflag`) so no per-input hardcodes are needed.
 
 ## Use
 

@@ -99,13 +99,13 @@ pub(crate) fn mapping0_forward(
     // This ensures that a long block (n2=1024) decays more than a short block (n2=128).
     *ampmax = vp_ampmax_decay(*ampmax, gi, n2, psy_look.rate);
 
-    if std::env::var("LW_DEBUG_PCM").is_ok() {
+    if crate::debug_flag!("LW_DEBUG_PCM") {
         for i in 0..channels {
             let vals: Vec<String> = pcm_blocks[i].iter().map(|v| format!("{:.8}", v)).collect();
             eprintln!("LW_WINDOWED_PCM ch={} n={}: [{}]", i, n, vals.join(","));
         }
     }
-    if std::env::var("LW_DEBUG_PCM_LAST").is_ok() && n == LONG_BLOCK {
+    if crate::debug_flag!("LW_DEBUG_PCM_LAST") && n == LONG_BLOCK {
         use std::sync::atomic::{AtomicUsize, Ordering};
         static N: AtomicUsize = AtomicUsize::new(0);
         let idx = N.fetch_add(1, Ordering::Relaxed);
@@ -212,7 +212,7 @@ pub(crate) fn mapping0_forward(
             *ampmax = local_ampmax[i];
         }
         // DEBUG
-        if std::env::var("LW_DEBUG_FFT").is_ok() {
+        if crate::debug_flag!("LW_DEBUG_FFT") {
             eprintln!(
                 "ch={} n={} local_ampmax={:.2} logfft[0..5]={:?}",
                 i,
@@ -239,7 +239,7 @@ pub(crate) fn mapping0_forward(
             .iter()
             .map(|&v| to_db(v.abs()) + 0.345_f32)
             .collect();
-        if std::env::var("LW_DEBUG_MDCT_RAW").is_ok() {
+        if crate::debug_flag!("LW_DEBUG_MDCT_RAW") {
             for &b in &[14usize, 186, 220, 260, 312, 372, 490] {
                 if b < n2 {
                     eprintln!(
@@ -255,7 +255,7 @@ pub(crate) fn mapping0_forward(
         // Noise mask
         vp_noisemask(psy_look, &logmdct, &mut noise_bufs[i]);
 
-        if std::env::var("LW_DEBUG_NOISE220").is_ok() && n == LONG_BLOCK && i == 0 {
+        if crate::debug_flag!("LW_DEBUG_NOISE220") && n == LONG_BLOCK && i == 0 {
             use std::sync::atomic::{AtomicUsize, Ordering};
             static N: AtomicUsize = AtomicUsize::new(0);
             let idx = N.fetch_add(1, Ordering::Relaxed);
@@ -286,17 +286,17 @@ pub(crate) fn mapping0_forward(
             local_ampmax[i],
         );
 
-        if std::env::var("LW_DEBUG_TONE").is_ok() {
+        if crate::debug_flag!("LW_DEBUG_TONE") {
             let vals: Vec<String> = tone_bufs[i].iter().map(|v| format!("{:.6}", v)).collect();
             eprintln!("LW_TONE: [{}]", vals.join(","));
             let nvals: Vec<String> = noise_bufs[i].iter().map(|v| format!("{:.6}", v)).collect();
             eprintln!("LW_NOISE: [{}]", nvals.join(","));
         }
-        if std::env::var("LW_DEBUG_FULLNOISE").is_ok() {
+        if crate::debug_flag!("LW_DEBUG_FULLNOISE") {
             let nvals: Vec<String> = noise_bufs[i].iter().map(|v| format!("{:.6}", v)).collect();
             eprintln!("LW_BLOCK0_NOISE: [{}]", nvals.join(","));
         }
-        if std::env::var("LEWTOFF_DEBUG_DUMP").is_ok() && i == 0 {
+        if crate::debug_dump::dump_enabled() && i == 0 {
             use std::sync::atomic::{AtomicBool, Ordering};
             static FIRED: AtomicBool = AtomicBool::new(false);
             if !FIRED.swap(true, Ordering::Relaxed) {
@@ -330,7 +330,7 @@ pub(crate) fn mapping0_forward(
 
         // floor1_fit
         let floor_state = &floor_states[mapping.floorsubmap[submap]];
-        if std::env::var("LW_DEBUG_LOGMDCT").is_ok() {
+        if crate::debug_flag!("LW_DEBUG_LOGMDCT") {
             let vals: Vec<String> = logmdct
                 .iter()
                 .map(|v| format!("0x{:08x}", v.to_bits()))
@@ -342,7 +342,7 @@ pub(crate) fn mapping0_forward(
                 .collect();
             eprintln!("LW_BLOCK0_LOGMASK_BITS: [{}]", mvals.join(","));
         }
-        if std::env::var("LW_DEBUG_PSY").is_ok() {
+        if crate::debug_flag!("LW_DEBUG_PSY") {
             eprintln!(
                 "LW_LOGMASK ch={} n={} ampmax={:.2} [0..5]: {:.2} {:.2} {:.2} {:.2} {:.2}",
                 i, n, *ampmax, logmask[0], logmask[1], logmask[2], logmask[3], logmask[4]
@@ -367,7 +367,7 @@ pub(crate) fn mapping0_forward(
                 dd::write_i32_bin("/tmp/lewtoff-debug/r_floor_posts.bin", posts);
             }
         }
-        if std::env::var("LW_DEBUG_FLOOR").is_ok() {
+        if crate::debug_flag!("LW_DEBUG_FLOOR") {
             if let Some(ref posts) = floor_posts[i] {
                 eprintln!(
                     "LW_FLOOR ch={} n={} ampmax={:.2} floor_posts={:?}",
@@ -485,7 +485,7 @@ pub(crate) fn mapping0_forward(
                         .iter()
                         .map(|&ci| iwork[ci].clone())
                         .collect();
-                    if std::env::var("LEWTOFF_DEBUG_DUMP").is_ok() {
+                    if crate::debug_dump::dump_enabled() {
                         use std::sync::atomic::{AtomicBool, Ordering};
                         static FIRED: AtomicBool = AtomicBool::new(false);
                         if !FIRED.swap(true, Ordering::Relaxed) {

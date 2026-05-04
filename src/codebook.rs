@@ -304,10 +304,10 @@ pub(crate) fn unpack_codebook(r: &mut BitReader) -> Result<Codebook, CodebookErr
         while i < entries {
             let bits = ov_ilog((entries - i) as u32);
             let num = r.read(bits) as usize;
-            if num == (1usize << bits) - 1 && bits < 32 {
-                // could be EOF sentinel if bits is small; C checks num == -1
-                // which can't happen for unsigned — proceed
-            }
+            // C checks `if(num==-1) goto _eofout;` on the signed return value
+            // of oggpack_read; our BitReader treats past-end as all-ones, so
+            // the bound check below catches that case (num would be larger
+            // than entries - i).
             if length > 32 || num > entries - i {
                 return Err(CodebookError::Eof);
             }

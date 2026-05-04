@@ -29,7 +29,7 @@ pub fn lpc_from_data(data: &[f32], lpci: &mut [f32], n: usize, m: usize) -> f32 
         }
         aut[j] = d;
     }
-    if std::env::var("LW_DEBUG_LPC").is_ok() {
+    if crate::debug_flag!("LW_DEBUG_LPC") {
         eprint!("LW_AUT[0..5]:");
         for val in aut.iter().take(5) {
             eprint!(" {:.15e}", val);
@@ -37,7 +37,7 @@ pub fn lpc_from_data(data: &[f32], lpci: &mut [f32], n: usize, m: usize) -> f32 
         eprintln!();
     }
     // One-shot dump of the full f64 aut[] for layer-diff against libvorbis.
-    if std::env::var("LEWTOFF_DEBUG_DUMP").is_ok() {
+    if crate::debug_dump::dump_enabled() {
         use std::sync::atomic::{AtomicBool, Ordering};
         static FIRED: AtomicBool = AtomicBool::new(false);
         if !FIRED.swap(true, Ordering::Relaxed) {
@@ -96,7 +96,7 @@ pub fn lpc_from_data(data: &[f32], lpci: &mut [f32], n: usize, m: usize) -> f32 
         *out = val as f32;
     }
 
-    if std::env::var("LEWTOFF_DEBUG_DUMP").is_ok() {
+    if crate::debug_dump::dump_enabled() {
         use std::sync::atomic::{AtomicBool, Ordering};
         static FIRED: AtomicBool = AtomicBool::new(false);
         if !FIRED.swap(true, Ordering::Relaxed) {
@@ -132,7 +132,7 @@ pub fn lpc_predict(coeff: &[f32], prime: &[f32], m: usize, data: &mut [f32], n: 
         work[..m].copy_from_slice(&prime[..m]);
     }
 
-    if std::env::var("LEWTOFF_DEBUG_DUMP").is_ok() {
+    if crate::debug_dump::dump_enabled() {
         use std::sync::atomic::{AtomicBool, Ordering};
         static FIRED: AtomicBool = AtomicBool::new(false);
         if !FIRED.swap(true, Ordering::Relaxed) {
@@ -164,7 +164,7 @@ pub fn lpc_predict(coeff: &[f32], prime: &[f32], m: usize, data: &mut [f32], n: 
         work[m + i] = y;
     }
 
-    if std::env::var("LEWTOFF_DEBUG_DUMP").is_ok() {
+    if crate::debug_dump::dump_enabled() {
         use std::sync::atomic::{AtomicBool, Ordering};
         static FIRED: AtomicBool = AtomicBool::new(false);
         if !FIRED.swap(true, Ordering::Relaxed) {

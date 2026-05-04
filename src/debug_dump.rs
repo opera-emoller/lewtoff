@@ -14,6 +14,18 @@ pub(crate) fn dump_enabled() -> bool {
     *DUMP_ENABLED.get_or_init(|| std::env::var("LEWTOFF_DEBUG_DUMP").is_ok())
 }
 
+/// Memoized read of a debug-toggling environment variable. Each call site gets
+/// its own `OnceLock<bool>` so the syscall+allocation cost of `env::var` is
+/// paid at most once per (named flag × process). Replaces inline
+/// `std::env::var("LW_DEBUG_X").is_ok()` checks in per-block hot loops.
+#[macro_export]
+macro_rules! debug_flag {
+    ($name:expr) => {{
+        static FLAG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        *FLAG.get_or_init(|| std::env::var($name).is_ok())
+    }};
+}
+
 pub(crate) fn try_claim_first_short_block() -> bool {
     SHORT_BLOCK_DUMPED.set(()).is_ok()
 }
