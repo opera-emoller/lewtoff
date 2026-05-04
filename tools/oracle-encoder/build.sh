@@ -25,7 +25,10 @@ if [ ! -d "$VEND" ]; then
 fi
 
 CC="${CC:-cc}"
-CFLAGS="${CFLAGS:--O0 -ffp-contract=off -std=c99 -Wno-implicit-function-declaration}"
+# Use gnu99 (not strict c99) so the libvorbis sources can call alloca()
+# without an explicit <alloca.h> include — strict c99 + glibc otherwise
+# emits an unresolved external-function reference at link time.
+CFLAGS="${CFLAGS:--O0 -ffp-contract=off -std=gnu99 -Wno-implicit-function-declaration}"
 
 # Find libogg. On macOS with homebrew it lives in /opt/homebrew/opt/libogg
 # (Apple Silicon) or /usr/local/opt/libogg (Intel). On Linux distros it's
