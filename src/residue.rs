@@ -572,220 +572,11 @@ pub(crate) fn _2class(
 // _01forward — port of _01forward in res0.c
 // ---------------------------------------------------------------------------
 
+/// Encode partitioned residue (libvorbis `_01forward` in res0.c). `indices`
+/// maps a compacted-channel position `j` (matching `partword[j]`) to its
+/// original channel in `in_`. For paths where `in_` is already pre-compacted,
+/// the caller passes identity indices.
 fn _01forward(
-    opb: &mut BitWriter,
-    info: &ResidueSetup,
-    look: &ResidueLook,
-    in_: &mut [&mut [i32]],
-    ch: usize,
-    partword: &[Vec<i64>],
-    books: &[Codebook],
-) -> i32 {
-    let samples_per_partition = info.grouping as usize;
-    let possible_partitions = info.partitions as usize;
-    let partitions_per_word = look.phrasebook_dim;
-    let n = (info.end - info.begin) as usize;
-
-    let partvals = n / samples_per_partition;
-
-    let mut resbits = [0i64; 128];
-    let mut resvals = [0i64; 128];
-
-    for s in 0..look.stages {
-        let mut i = 0usize;
-        while i < partvals {
-            // first we encode a partition codeword for each channel
-            if s == 0 {
-                for j in 0..ch {
-                    let mut val = partword[j][i];
-                    for k in 1..partitions_per_word {
-                        val *= possible_partitions as i64;
-                        if i + k < partvals {
-                            val += partword[j][i + k];
-                        }
-                    }
-
-                    if val < look.phrasebook_entries as i64 {
-                        let phrasebook = &books[look.phrasebook_idx];
-                        look_phrasebits_add(vorbis_book_encode(phrasebook, val as i32, opb) as i64);
-                    }
-                }
-            }
-
-            // now we encode interleaved residual values for the partitions
-            let mut k = 0usize;
-            while k < partitions_per_word && i < partvals {
-                let offset = i * samples_per_partition + info.begin as usize;
-
-                for j in 0..ch {
-                    if s == 0 {
-                        resvals[partword[j][i] as usize] += samples_per_partition as i64;
-                    }
-                    let pw = partword[j][i] as usize;
-                    if info.secondstages[pw] & (1 << s) != 0 {
-                        if pw < look.partbooks.len() && s < look.partbooks[pw].len() {
-                            if let Some(book_idx) = look.partbooks[pw][s] {
-                                let statebook = &books[book_idx];
-                                let ret = _encodepart(
-                                    opb,
-                                    &mut in_[j][offset..offset + samples_per_partition],
-                                    samples_per_partition,
-                                    statebook,
-                                );
-                                look_postbits_add(ret as i64);
-                                resbits[pw] += ret as i64;
-                            }
-                        }
-                    }
-                }
-                k += 1;
-                i += 1;
-            }
-        }
-    }
-
-    0
-}
-
-// No-op stat helpers (libvorbis tracks these in the look struct; we elide them
-// since they're only used for training/stats, not for correctness).
-#[inline(always)]
-fn look_phrasebits_add(_bits: i64) {}
-#[inline(always)]
-fn look_postbits_add(_bits: i64) {}
-
-// ---------------------------------------------------------------------------
-// res1_class — port of res1_class
-// ---------------------------------------------------------------------------
-
-pub(crate) fn res1_class(
-    info: &ResidueSetup,
-    look: &ResidueLook,
-    in_: &mut Vec<&[i32]>,
-    nonzero: &[bool],
-    ch: usize,
-) -> Option<Vec<Vec<i64>>> {
-    let mut used = 0usize;
-    let mut used_in: Vec<&[i32]> = Vec::new();
-    for i in 0..ch {
-        if nonzero[i] {
-            used_in.push(in_[i]);
-            used += 1;
-        }
-    }
-    if used > 0 {
-        Some(_01class(info, look, &used_in, used))
-    } else {
-        None
-    }
-}
-
-// ---------------------------------------------------------------------------
-// res1_forward — port of res1_forward
-// ---------------------------------------------------------------------------
-
-pub(crate) fn res1_forward(
-    opb: &mut BitWriter,
-    info: &ResidueSetup,
-    look: &ResidueLook,
-    in_: &mut [&mut [i32]],
-    nonzero: &[bool],
-    ch: usize,
-    partword: &[Vec<i64>],
-    books: &[Codebook],
-) -> i32 {
-    let mut used = 0usize;
-    let mut used_in: Vec<&mut [i32]> = Vec::new();
-
-    // We need to compact the channels; collect indices first to avoid borrow issues
-    // (literal port: in[used++]=in[i] for nonzero[i])
-    let mut indices: Vec<usize> = Vec::new();
-    for i in 0..ch {
-        if nonzero[i] {
-            indices.push(i);
-        }
-    }
-    used = indices.len();
-
-    if used > 0 {
-        // Safety: `in_` contains mutable slices; we split by index.
-        // We build a Vec of raw mut pointers, then reborrow as mut slices.
-        // This is pure safe Rust via repeated split_at_mut-style logic.
-        // Instead of pointer tricks we just pass the full slice and a mask.
-        _01forward_indexed(opb, info, look, in_, &indices, partword, books)
-    } else {
-        0
-    }
-}
-
-// ---------------------------------------------------------------------------
-// res2_class — port of res2_class
-// ---------------------------------------------------------------------------
-
-pub(crate) fn res2_class(
-    info: &ResidueSetup,
-    look: &ResidueLook,
-    in_: &[&[i32]],
-    nonzero: &[bool],
-    ch: usize,
-) -> Option<Vec<Vec<i64>>> {
-    let mut used = 0usize;
-    for i in 0..ch {
-        if nonzero[i] {
-            used += 1;
-        }
-    }
-    if used > 0 {
-        Some(_2class(info, look, in_, ch))
-    } else {
-        None
-    }
-}
-
-// ---------------------------------------------------------------------------
-// res2_forward — port of res2_forward
-// ---------------------------------------------------------------------------
-
-pub(crate) fn res2_forward(
-    opb: &mut BitWriter,
-    info: &ResidueSetup,
-    look: &ResidueLook,
-    in_: &[&[i32]],
-    nonzero: &[bool],
-    ch: usize,
-    n: usize,
-    partword: &[Vec<i64>],
-    books: &[Codebook],
-) -> i32 {
-    let mut used = 0usize;
-
-    let mut work: Vec<i32> = vec![0i32; ch * n];
-    for i in 0..ch {
-        let pcm = in_[i];
-        if nonzero[i] {
-            used += 1;
-        }
-        let mut k = i;
-        for j in 0..n {
-            work[k] = pcm[j];
-            k += ch;
-        }
-    }
-
-    if used > 0 {
-        let mut work_ref: &mut [i32] = &mut work;
-        let mut wrapped: [&mut [i32]; 1] = [work_ref];
-        _01forward(opb, info, look, &mut wrapped, 1, partword, books)
-    } else {
-        0
-    }
-}
-
-// ---------------------------------------------------------------------------
-// _01forward_indexed — helper that compacts channels before calling _01forward
-// ---------------------------------------------------------------------------
-
-fn _01forward_indexed(
     opb: &mut BitWriter,
     info: &ResidueSetup,
     look: &ResidueLook,
@@ -795,16 +586,6 @@ fn _01forward_indexed(
     books: &[Codebook],
 ) -> i32 {
     let used = indices.len();
-
-    // partword from res1_class is already compacted to `used` rows (one per
-    // nonzero channel), in the same order as `indices`. So row j here matches
-    // the original channel `indices[j]` in `in_`.
-
-    // We need to call _01forward with compacted in_ channels.
-    // Since we can't easily compact &mut slices without unsafe, we use the
-    // full in_ slice with direct index remapping via a local inline expansion.
-    // This mirrors the C `in[used++]=in[i]` pointer compaction.
-
     let samples_per_partition = info.grouping as usize;
     let possible_partitions = info.partitions as usize;
     let partitions_per_word = look.phrasebook_dim;
@@ -876,6 +657,129 @@ fn _01forward_indexed(
     }
 
     0
+}
+
+// ---------------------------------------------------------------------------
+// res1_class — port of res1_class
+// ---------------------------------------------------------------------------
+
+pub(crate) fn res1_class(
+    info: &ResidueSetup,
+    look: &ResidueLook,
+    in_: &mut Vec<&[i32]>,
+    nonzero: &[bool],
+    ch: usize,
+) -> Option<Vec<Vec<i64>>> {
+    let mut used = 0usize;
+    let mut used_in: Vec<&[i32]> = Vec::new();
+    for i in 0..ch {
+        if nonzero[i] {
+            used_in.push(in_[i]);
+            used += 1;
+        }
+    }
+    if used > 0 {
+        Some(_01class(info, look, &used_in, used))
+    } else {
+        None
+    }
+}
+
+// ---------------------------------------------------------------------------
+// res1_forward — port of res1_forward
+// ---------------------------------------------------------------------------
+
+pub(crate) fn res1_forward(
+    opb: &mut BitWriter,
+    info: &ResidueSetup,
+    look: &ResidueLook,
+    in_: &mut [&mut [i32]],
+    nonzero: &[bool],
+    ch: usize,
+    partword: &[Vec<i64>],
+    books: &[Codebook],
+) -> i32 {
+    let mut used = 0usize;
+    let mut used_in: Vec<&mut [i32]> = Vec::new();
+
+    // We need to compact the channels; collect indices first to avoid borrow issues
+    // (literal port: in[used++]=in[i] for nonzero[i])
+    let mut indices: Vec<usize> = Vec::new();
+    for i in 0..ch {
+        if nonzero[i] {
+            indices.push(i);
+        }
+    }
+    used = indices.len();
+
+    if used > 0 {
+        _01forward(opb, info, look, in_, &indices, partword, books)
+    } else {
+        0
+    }
+}
+
+// ---------------------------------------------------------------------------
+// res2_class — port of res2_class
+// ---------------------------------------------------------------------------
+
+pub(crate) fn res2_class(
+    info: &ResidueSetup,
+    look: &ResidueLook,
+    in_: &[&[i32]],
+    nonzero: &[bool],
+    ch: usize,
+) -> Option<Vec<Vec<i64>>> {
+    let mut used = 0usize;
+    for i in 0..ch {
+        if nonzero[i] {
+            used += 1;
+        }
+    }
+    if used > 0 {
+        Some(_2class(info, look, in_, ch))
+    } else {
+        None
+    }
+}
+
+// ---------------------------------------------------------------------------
+// res2_forward — port of res2_forward
+// ---------------------------------------------------------------------------
+
+pub(crate) fn res2_forward(
+    opb: &mut BitWriter,
+    info: &ResidueSetup,
+    look: &ResidueLook,
+    in_: &[&[i32]],
+    nonzero: &[bool],
+    ch: usize,
+    n: usize,
+    partword: &[Vec<i64>],
+    books: &[Codebook],
+) -> i32 {
+    let mut used = 0usize;
+
+    let mut work: Vec<i32> = vec![0i32; ch * n];
+    for i in 0..ch {
+        let pcm = in_[i];
+        if nonzero[i] {
+            used += 1;
+        }
+        let mut k = i;
+        for j in 0..n {
+            work[k] = pcm[j];
+            k += ch;
+        }
+    }
+
+    if used > 0 {
+        let work_ref: &mut [i32] = &mut work;
+        let mut wrapped: [&mut [i32]; 1] = [work_ref];
+        _01forward(opb, info, look, &mut wrapped, &[0], partword, books)
+    } else {
+        0
+    }
 }
 
 // ---------------------------------------------------------------------------
