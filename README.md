@@ -6,7 +6,9 @@ Named after [lewton](https://github.com/RustAudio/lewton) — the pure-Rust
 Vorbis decoder. lewtoff is its encoder counterpart.
 
 The crate forbids `unsafe` and pulls in a single runtime dependency
-(the `ogg` crate, for page framing and CRC).
+(the `ogg` crate, for page framing and CRC). An optional `parallel`
+feature adds Rayon-based block-level fan-out — see
+[Parallel encoding](#parallel-encoding) below.
 
 ## Status
 
@@ -44,6 +46,37 @@ space is closed by construction), no streaming, no `Write` trait.
 | Quality       | Q5 (≈160 kbps stereo, ≈80 kbps mono) |
 
 Outside this space, behavior is undefined.
+
+## Parallel encoding
+
+For long inputs (minutes of audio), enable the `parallel` feature to fan
+per-block analysis (MDCT, FFT, psy, floor, residue) across the global
+Rayon thread pool. Bit-packing and Ogg page emission stay serial; the
+output is byte-identical to the serial path.
+
+```toml
+[dependencies]
+lewtoff = { version = "0.1", features = ["parallel"] }
+```
+
+Public API is unchanged. The feature is off by default to keep the
+default build lean (single `ogg` runtime dep) and WASM-friendly — Rayon
+needs `SharedArrayBuffer` and special host headers in browsers, so
+WASM consumers should leave it off.
+
+Speedup scales with audio length. On an 8-core M-series Mac, encoding
+a 261s MP3:
+
+| Path     | Wall  | User CPU | vs oggenc |
+|----------|-------|----------|-----------|
+| serial   | 1.45s | 1.42s    | ~0.83×    |
+| parallel | 0.30s | 1.97s    | ~4.0×     |
+
+Sub-second inputs see no speedup (too few blocks to feed all cores) but
+no overhead penalty either. If you're already doing outer parallelism
+across many files (e.g. a game-asset pipeline), leave `parallel` off
+— Rayon would compose without oversubscribing, but the inner
+job-collection vec adds a few microseconds per call you don't need.
 
 ## How parity is enforced
 
@@ -83,6 +116,7 @@ decoded via `ffmpeg` to s16le 44.1kHz stereo before encoding. Set
 ```sh
 cargo nextest run                              # unit + integration
 cargo nextest run --features oracle parity_    # parity vs oracle
+just parity                                    # parity for serial AND parallel paths
 ```
 
 CI (`.github/workflows/ci.yml`) builds the oracle from the vendored

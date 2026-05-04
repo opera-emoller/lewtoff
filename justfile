@@ -26,6 +26,7 @@ fmt-check:
 
 clippy:
     cargo clippy --all-targets -- -D warnings
+    cargo clippy --all-targets --features parallel -- -D warnings
 
 # All unit + integration tests. Uses cargo-nextest if available
 # (~40% faster wall-clock and ~99% less output on green runs).
@@ -42,10 +43,13 @@ test:
 test-verbose:
     cargo nextest run --no-tests=warn
 
-# Oracle parity: requires ffmpeg with libvorbis 1.3.7 on PATH.
-# Encodes the same input via lewtoff and via ffmpeg, byte-diffs the output.
+# Oracle parity: encodes the same input via lewtoff and via the in-tree
+# oracle-encoder (libvorbis 1.3.7, deterministic flags), byte-diffs the
+# output. Runs both serial and parallel paths so a regression in either
+# is caught locally.
 parity:
     cargo nextest run --features oracle --no-tests=warn parity_
+    cargo nextest run --features oracle,parallel --no-tests=warn parity_
 
 # Corpus parity sweep: walks <repo_root>/corpus/ recursively and asserts
 # byte-identical parity for every audio file (wav/mp3/ogg/flac/m4a/aif/aiff).
@@ -54,17 +58,28 @@ parity:
 # Pass a number as the first arg to limit the file count for smoke runs:
 #     just corpus           # sweep everything
 #     just corpus 100       # first 100 files (sorted)
-corpus limit="":
-    CORPUS_LIMIT={{limit}} cargo nextest run --features oracle --no-tests=warn \
+# Pass `parallel` as the second arg to test the rayon path:
+#     just corpus 100 parallel
+corpus limit="" extra_features="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    FEATS="oracle"
+    if [ -n "{{extra_features}}" ]; then
+        FEATS="oracle,{{extra_features}}"
+    fi
+    CORPUS_LIMIT={{limit}} cargo nextest run --features "$FEATS" --no-tests=warn \
         --run-ignored=only -E 'test(corpus_parity_sweep)'
 
 # Encode-throughput benchmark vs libvorbis (oggenc from vorbis-tools) using
 # hyperfine. Decodes <input> once to s16le 44.1kHz stereo, then times both
 # encoders end-to-end (stdin → ogg on stdout, dropped to /dev/null).
 #
-#     just bench                          # uses corpus/beach_bro/snd_neon_nights.mp3
-#     just bench corpus/path/to/file.wav  # use a specific file
-bench input="corpus/beach_bro/snd_neon_nights.mp3":
+# Pass `parallel` as the second arg to bench the Rayon-parallel build:
+#     just bench                                       # serial lewtoff
+#     just bench corpus/path/to/file.wav               # serial on file
+#     just bench corpus/path/to/file.wav parallel      # parallel on file
+#     just bench corpus/beach_bro/snd_neon_nights.mp3 parallel
+bench input="corpus/beach_bro/snd_neon_nights.mp3" features="":
     #!/usr/bin/env bash
     set -euo pipefail
     if ! command -v hyperfine >/dev/null 2>&1; then
@@ -88,14 +103,47 @@ bench input="corpus/beach_bro/snd_neon_nights.mp3":
     SAMPLES=$((SIZE / 4))
     SECS=$(awk "BEGIN{printf \"%.2f\", $SAMPLES/44100}")
     echo "input: $SAMPLES frames (${SECS}s of audio, $SIZE bytes raw)"
-    cargo build --release -q -p lewtoff-cli
+    BUILD_FLAGS=""
+    LW_NAME="lewtoff"
+    if [ -n "{{features}}" ]; then
+        BUILD_FLAGS="--features {{features}}"
+        LW_NAME="lewtoff ({{features}})"
+    fi
+    cargo build --release -q -p lewtoff-cli $BUILD_FLAGS
     LWBIN="$PWD/target/release/lewtoff"
     echo
     hyperfine --warmup 1 \
-        --command-name 'lewtoff' \
+        --command-name "$LW_NAME" \
         "$LWBIN 44100 stereo < $PCM > /dev/null" \
         --command-name 'oggenc (libvorbis)' \
         "oggenc -Q -q 5 -R 44100 -B 16 -C 2 --raw - -o - < $PCM > /dev/null"
+
+# Profile a single lewtoff encode end-to-end with samply, opening the
+# resulting profile in a browser (Firefox profiler UI). Same input
+# semantics as `bench`.
+#
+#     just profile                          # uses corpus/beach_bro/snd_neon_nights.mp3
+#     just profile corpus/path/to/file.wav  # use a specific file
+profile input="corpus/beach_bro/snd_neon_nights.mp3":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! command -v samply >/dev/null 2>&1; then
+        echo "samply not on PATH — install via \`cargo install --locked samply\` or \`brew install samply\`" >&2
+        exit 2
+    fi
+    : ${TMPDIR:=/tmp/}
+    PCM="${TMPDIR%/}/lewtoff-bench.s16le"
+    if [ ! -f "{{input}}" ]; then
+        echo "input not found: {{input}}" >&2
+        exit 2
+    fi
+    echo "decoding {{input}} → s16le 44100Hz stereo..."
+    ffmpeg -hide_banner -loglevel error -y -i "{{input}}" \
+        -f s16le -ar 44100 -ac 2 "$PCM"
+    cargo build --release -q -p lewtoff-cli
+    LWBIN="$PWD/target/release/lewtoff"
+    echo "recording samply profile (browser will open when encode finishes)..."
+    samply record -- "$LWBIN" 44100 stereo < "$PCM" > /dev/null
 
 # Per-chunk diff helper for parity failures.
 # Usage: just parity-diff input.s16le 44100 mono
