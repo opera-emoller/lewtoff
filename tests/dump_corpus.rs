@@ -1,7 +1,7 @@
 //! Helper that dumps lewtoff/oracle ogg for a corpus file (manually run).
 #![cfg(feature = "oracle")]
 
-use std::io::{Read, Write};
+use std::io::Write;
 use std::process::{Command, Stdio};
 
 fn ffmpeg_decode(path: &str, rate: u32, ch: u16) -> Vec<i16> {
