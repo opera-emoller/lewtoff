@@ -57,6 +57,44 @@ pub(crate) struct BlockMode {
     pub next_window: bool,
 }
 
+/// Reusable per-block scratch owned by the encoder loop. Each `Vec` is
+/// preallocated to `LONG_HALF` (the max half-block size) and re-sliced to
+/// the current block's `n2` per call. Avoids ~10 heap allocs per block in
+/// `mapping0_forward`.
+pub(crate) struct MappingScratch {
+    pub gmdct: Vec<Vec<f32>>,
+    pub gmdct_work: Vec<Vec<f32>>,
+    pub logfft: Vec<Vec<f32>>,
+    pub local_ampmax: Vec<f32>,
+    pub logmdct: Vec<f32>,
+    pub logmask: Vec<f32>,
+    pub noise_bufs: Vec<Vec<f32>>,
+    pub tone_bufs: Vec<Vec<f32>>,
+    pub iwork: Vec<Vec<i32>>,
+    pub nonzero: Vec<i32>,
+    pub floor_posts: Vec<Option<Vec<i32>>>,
+}
+
+impl MappingScratch {
+    pub fn new(channels: usize) -> Self {
+        let make_vv_f32 = || (0..channels).map(|_| vec![0.0f32; LONG_HALF]).collect();
+        let make_vv_i32 = || (0..channels).map(|_| vec![0i32; LONG_HALF]).collect();
+        Self {
+            gmdct: make_vv_f32(),
+            gmdct_work: make_vv_f32(),
+            logfft: make_vv_f32(),
+            local_ampmax: vec![0.0f32; channels],
+            logmdct: vec![0.0f32; LONG_HALF],
+            logmask: vec![0.0f32; LONG_HALF],
+            noise_bufs: make_vv_f32(),
+            tone_bufs: make_vv_f32(),
+            iwork: make_vv_i32(),
+            nonzero: vec![0i32; channels],
+            floor_posts: (0..channels).map(|_| None).collect(),
+        }
+    }
+}
+
 pub(crate) fn mapping0_forward(
     pcm_blocks: &[Vec<f32>], // per-channel windowed PCM, variable length (256 or 2048)
     psy_look: &VorbisLookPsy,
@@ -69,6 +107,7 @@ pub(crate) fn mapping0_forward(
     mapping: &Mapping,
     block_mode: &BlockMode,
     books: &[crate::codebook::Codebook],
+    scratch: &mut MappingScratch,
     opb: &mut BitWriter,
 ) {
     let n = if block_mode.is_long {
@@ -78,21 +117,39 @@ pub(crate) fn mapping0_forward(
     };
     let n2 = n / 2;
     let channels = pcm_blocks.len();
+    // Reset scratch buffers (sized to LONG_HALF; touch only n2 worth).
+    for c in 0..channels {
+        scratch.gmdct[c][..n2].fill(0.0);
+        scratch.gmdct_work[c][..n2].fill(0.0);
+        scratch.logfft[c][..n2].fill(0.0);
+        scratch.noise_bufs[c][..n2].fill(0.0);
+        scratch.tone_bufs[c][..n2].fill(0.0);
+        scratch.iwork[c][..n2].fill(0);
+        scratch.floor_posts[c] = None;
+    }
+    scratch.local_ampmax[..channels].fill(0.0);
+    scratch.nonzero[..channels].fill(0);
+    scratch.logmdct[..n2].fill(0.0);
+    scratch.logmask[..n2].fill(0.0);
+    // Disjoint &mut borrows of scratch fields. Rust 2024's improved field
+    // borrow analysis lets these be live simultaneously.
+    let gmdct: &mut Vec<Vec<f32>> = &mut scratch.gmdct;
+    let gmdct_work: &mut Vec<Vec<f32>> = &mut scratch.gmdct_work;
+    let logfft: &mut Vec<Vec<f32>> = &mut scratch.logfft;
+    let local_ampmax: &mut Vec<f32> = &mut scratch.local_ampmax;
+    let scratch_logmdct: &mut Vec<f32> = &mut scratch.logmdct;
+    let scratch_logmask: &mut Vec<f32> = &mut scratch.logmask;
+    let noise_bufs: &mut Vec<Vec<f32>> = &mut scratch.noise_bufs;
+    let tone_bufs: &mut Vec<Vec<f32>> = &mut scratch.tone_bufs;
+    let iwork: &mut Vec<Vec<i32>> = &mut scratch.iwork;
+    let nonzero: &mut Vec<i32> = &mut scratch.nonzero;
+    let floor_posts: &mut Vec<Option<Vec<i32>>> = &mut scratch.floor_posts;
 
     let do_dump = !block_mode.is_long && dd::dump_enabled() && dd::try_claim_mapping0_dump();
 
     // Scale factor for dB computation (port of `scale = 4.f/n; scale_dB = todB(&scale) + .345`)
     let scale = 4.0f32 / n as f32;
     let scale_dB = to_db(scale) + 0.345_f32;
-
-    // Per-channel MDCT output (gmdct)
-    let mut gmdct: Vec<Vec<f32>> = vec![vec![0.0f32; n2]; channels];
-
-    // Per-channel log-FFT approximation (logfft, overlaid on pcm scratch)
-    let mut logfft: Vec<Vec<f32>> = vec![vec![0.0f32; n2]; channels];
-
-    // Per-channel local amplitude max
-    let mut local_ampmax = vec![0.0f32; channels];
 
     // Apply ampmax decay at the START of each block (port of block.c _vp_ampmax_decay call).
     // libvorbis decays g->ampmax before calling mapping0_forward, using the CURRENT block's n2.
@@ -142,7 +199,7 @@ pub(crate) fn mapping0_forward(
                 .expect("long block size");
             let mut out = [0.0f32; LONG_HALF];
             mdct_forward_long(pcm_arr, &mut out);
-            gmdct[i].copy_from_slice(&out);
+            gmdct[i][..n2].copy_from_slice(&out);
         } else {
             let pcm_arr: &[f32; SHORT_BLOCK] = pcm_blocks[i]
                 .as_slice()
@@ -150,7 +207,7 @@ pub(crate) fn mapping0_forward(
                 .expect("short block size");
             let mut out = [0.0f32; SHORT_HALF];
             mdct_forward_short(pcm_arr, &mut out);
-            gmdct[i].copy_from_slice(&out);
+            gmdct[i][..n2].copy_from_slice(&out);
         }
 
         // Compute log-magnitude spectrum via real FFT on the windowed PCM.
@@ -225,12 +282,11 @@ pub(crate) fn mapping0_forward(
 
     // Noise + tone masking per channel, then floor1 fit
     // Port of: lines 362-576 in mapping0.c (minus bitrate management, we use offset_select=1 only)
-    let mut floor_posts: Vec<Option<Vec<i32>>> = vec![None; channels];
-    let mut noise_bufs: Vec<Vec<f32>> = vec![vec![0.0f32; n2]; channels];
-    let mut tone_bufs: Vec<Vec<f32>> = vec![vec![0.0f32; n2]; channels];
-
-    // We need gmdct_copy for use after the loop (psy modifies it in vp_offset_and_mix)
-    let mut gmdct_work: Vec<Vec<f32>> = gmdct.clone();
+    // gmdct_work gets mutated by vp_offset_and_mix and vp_couple_quantize_normalize
+    // — copy gmdct into it. (Both buffers live in `scratch`.)
+    for c in 0..channels {
+        gmdct_work[c][..n2].copy_from_slice(&gmdct[c][..n2]);
+    }
 
     for i in 0..channels {
         let submap = mapping.chmuxlist[i];
@@ -435,9 +491,9 @@ pub(crate) fn mapping0_forward(
         gi,
         psy_look,
         &mapping.vp_mapping,
-        &mut gmdct_work,
-        &mut iwork,
-        &mut nonzero,
+        gmdct_work.as_mut_slice(),
+        iwork.as_mut_slice(),
+        nonzero.as_mut_slice(),
         sliding_lowpass,
         channels,
     );

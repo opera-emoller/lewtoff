@@ -10,6 +10,7 @@
 use crate::bitpack::BitWriter;
 use crate::headers::{write_comment_header_with_strings, write_id_header, write_setup_header};
 use crate::lpc::{lpc_from_data, lpc_predict};
+use crate::mapping0;
 use crate::mapping0::{BlockMode, mapping0_forward};
 use crate::ogg_pages::OggStreamWriter;
 use crate::psy::{
@@ -955,6 +956,11 @@ pub(crate) fn encode_with_serial_and_meta(
     // Windowing buffers per channel
     let mut win_bufs: Vec<WindowingBuffer> = (0..ch).map(|_| WindowingBuffer::new()).collect();
 
+    // Per-block scratch reused across the per-block loop. Allocates once
+    // to LONG_HALF capacity for each per-channel buffer; mapping0_forward
+    // resets and slices to the current block's n2 per call.
+    let mut mapping_scratch = mapping0::MappingScratch::new(ch);
+
     // Pre-stream LPC extrapolation (port of libvorbis _preextrapolate_helper).
     // Fill in virtual samples before the stream start so the first short block's
     // left half contains LPC-predicted continuations instead of zeros.
@@ -1216,6 +1222,7 @@ pub(crate) fn encode_with_serial_and_meta(
             mapping,
             &block_mode,
             &setup.books,
+            &mut mapping_scratch,
             &mut w,
         );
         let packet_bytes = w.into_bytes();

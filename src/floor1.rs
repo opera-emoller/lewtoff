@@ -689,7 +689,7 @@ pub(crate) fn floor1_fit(look: &Floor1State, logmdct: &[f32], logmask: &[f32]) -
     let n = look.n;
     let posts = look.posts;
     let mut nonzero: i32 = 0;
-    let mut fits = vec![LsfitAcc::default(); VIF_POSIT + 1];
+    let mut fits = [LsfitAcc::default(); VIF_POSIT + 1];
     let mut fit_valueA = [-200i32; VIF_POSIT + 2];
     let mut fit_valueB = [-200i32; VIF_POSIT + 2];
 

@@ -692,22 +692,39 @@ fn seed_curve(
         .min(P_LEVELS as i32 - 1) as usize;
     let posts = &curves[choice];
     let curve = &posts[2..];
+    let post0 = posts[0] as usize;
     let post1 = posts[1] as usize;
-    let post0 = posts[0] as i64;
-    let mut seedptr = oc + (post0 - EHMER_OFFSET as i64) * linesper as i64 - (linesper >> 1) as i64;
+    let lp = linesper as i64;
+    let seedptr0 = oc + (post0 as i64 - EHMER_OFFSET as i64) * lp - (linesper >> 1) as i64;
 
-    for i in posts[0] as usize..post1 {
-        if seedptr > 0 {
-            let lin = amp + curve[i];
-            let sp = seedptr as usize;
-            if sp < seed.len() && seed[sp] < lin {
-                seed[sp] = lin;
-            }
+    // Pre-compute the iteration window where 0 < seedptr < n. The seedptr
+    // recurrence is `seedptr0 + lp*(i-post0)`, so we can solve for i directly
+    // and drop the per-iter `if seedptr > 0` and `if seedptr >= n` branches.
+    // ceil_div for positive (a, b > 0): (a + b - 1) / b
+    let ceil_div = |a: i64, b: i64| -> i64 { (a + b - 1) / b };
+    let i_lo = if seedptr0 > 0 {
+        post0
+    } else {
+        // smallest i such that seedptr0 + lp*(i-post0) > 0
+        post0 + ceil_div(-seedptr0 + 1, lp) as usize
+    };
+    let i_hi = if seedptr0 >= n {
+        post0
+    } else {
+        // smallest i such that seedptr0 + lp*(i-post0) >= n
+        post0 + ceil_div(n - seedptr0, lp) as usize
+    };
+    let lo = i_lo.max(post0).min(post1);
+    let hi = i_hi.max(lo).min(post1);
+
+    let mut seedptr = seedptr0 + lp * (lo as i64 - post0 as i64);
+    for i in lo..hi {
+        let lin = amp + curve[i];
+        let sp = seedptr as usize;
+        if seed[sp] < lin {
+            seed[sp] = lin;
         }
-        seedptr += linesper as i64;
-        if seedptr >= n {
-            break;
-        }
+        seedptr += lp;
     }
 }
 
@@ -764,40 +781,46 @@ fn seed_loop(
 // ---------------------------------------------------------------------------
 
 fn seed_chase(seeds: &mut [f32], linesper: i32, n: usize) {
-    let mut posstack: Vec<usize> = Vec::with_capacity(n);
-    let mut ampstack: Vec<f32> = Vec::with_capacity(n);
+    // Stack-allocated stacks. n <= MAX_OCTAVE_LINES (1024 worst case Q5).
+    let mut posstack_arr = [0usize; MAX_OCTAVE_LINES];
+    let mut ampstack_arr = [0.0f32; MAX_OCTAVE_LINES];
+    let mut sp = 0usize;
+    let posstack = &mut posstack_arr[..];
+    let ampstack = &mut ampstack_arr[..];
 
     for i in 0..n {
-        if posstack.len() < 2 {
-            posstack.push(i);
-            ampstack.push(seeds[i]);
+        if sp < 2 {
+            posstack[sp] = i;
+            ampstack[sp] = seeds[i];
+            sp += 1;
         } else {
             loop {
-                let top = posstack.len() - 1;
+                let top = sp - 1;
                 if seeds[i] < ampstack[top] {
-                    posstack.push(i);
-                    ampstack.push(seeds[i]);
+                    posstack[sp] = i;
+                    ampstack[sp] = seeds[i];
+                    sp += 1;
                     break;
                 } else {
                     if i < posstack[top] + linesper as usize {
-                        if posstack.len() > 1
+                        if sp > 1
                             && ampstack[top] <= ampstack[top - 1]
                             && i < posstack[top - 1] + linesper as usize
                         {
-                            posstack.pop();
-                            ampstack.pop();
+                            sp -= 1;
                             continue;
                         }
                     }
-                    posstack.push(i);
-                    ampstack.push(seeds[i]);
+                    posstack[sp] = i;
+                    ampstack[sp] = seeds[i];
+                    sp += 1;
                     break;
                 }
             }
         }
     }
 
-    let stack = posstack.len();
+    let stack = sp;
     let mut pos: usize = 0;
     for i in 0..stack {
         let endpos = if i < stack - 1 && ampstack[i + 1] > ampstack[i] {
