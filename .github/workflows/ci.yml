@@ -17,19 +17,22 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-nextest
-      - name: Install ffmpeg (oracle parity tests shell out to it)
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: Install ffmpeg + libogg-dev (oracle build deps)
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg libogg-dev
       - name: Verify libvorbis version
         run: |
+          # ffmpeg's libvorbis link is informational only — oracle-encoder
+          # statically links our vendored 1.3.7 sources. We still pin the
+          # system version for repeatability of ffmpeg's pcm decode.
           dpkg-query -W -f='${Version}\n' libvorbis0a 2>/dev/null | grep -E "^1\.3" \
             || { echo "Wrong libvorbis version — parity tests pin to 1.3.x"; exit 1; }
+      - name: Build oracle-encoder from vendored libvorbis sources
+        run: ./tools/oracle-encoder/build.sh
       - run: cargo fmt --all -- --check
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo nextest run --status-level=fail --no-tests=warn
-      # TODO: flip --no-tests=warn → --no-tests=fail once tests/parity.rs lands in Phase 8/9.
-      # Until then, the parity_ filter matches nothing and we don't want the step to fail.
       - name: Oracle parity (Linux glibc libm path)
-        run: cargo nextest run --features oracle --no-tests=warn parity_
+        run: cargo nextest run --features oracle --no-tests=fail parity_
 
   wasm:
     runs-on: ubuntu-latest

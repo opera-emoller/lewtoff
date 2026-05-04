@@ -19,3 +19,11 @@
 /tools/debug-libvorbis-dump/ramp_harness.dSYM/
 /tools/oracle-encoder/dump_window_tables
 /tools/oracle-encoder/dump_window_tables.dSYM/
+
+# oracle-encoder is the parity oracle used by tests/parity.rs. It must be
+# rebuilt locally from the vendored libvorbis sources (run
+# ./tools/oracle-encoder/build.sh after pulling). CI rebuilds it from the
+# checked-out tree, so the host's macOS arm64 binary should not be
+# committed alongside the Linux x86_64 version CI produces.
+/tools/oracle-encoder/oracle-encoder
+/tools/oracle-encoder/oracle-encoder.dSYM/
