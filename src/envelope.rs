@@ -730,6 +730,115 @@ pub fn full_w_pattern_with_curmark(marks: &[bool], n_samples: i64) -> (Vec<i32>,
     (pattern, curmarks)
 }
 
+/// Faithful streaming-blockout simulation.
+///
+/// Mirrors libvorbis's `vorbis_analysis_blockout` chunk-by-chunk drain so we
+/// can derive the exact `pcm_current` libvorbis observes at EOS (i.e. the
+/// `eofflag` value captured inside `vorbis_analysis_wrote(v, 0)`). This is
+/// what post-extrap LPC training keys on.
+///
+/// Inputs:
+///   - `marks`: precomputed envelope marks over the full env_pcm buffer
+///     (pre-extrap + audio + post-extrap), in absolute coordinates.
+///   - `total_audio`: number of real audio samples (no pre/post-extrap).
+///   - `chunk_size`: PCM feed granularity. ffmpeg+libvorbis use 64.
+///
+/// Returns `pcm_current` at the moment EOS is signaled — i.e. after all audio
+/// has been fed and the blockout drain has run as far as it can without
+/// `eofflag` being set. This is the value libvorbis stores in `v->eofflag`.
+pub fn simulate_eofflag(marks: &[bool], total_audio: i64, chunk_size: i64) -> i64 {
+    let bs0 = SHORT_BLOCK as i64;
+    let bs1 = LONG_BLOCK as i64;
+    let step = ENV_SEARCHSTEP as i64;
+    let ve_win = VE_WIN as i64;
+
+    let mut pcm_current: i64 = bs1 / 2; // libvorbis init
+    let mut samples_fed: i64 = 0;
+    let mut preextrapolated = false;
+    let preextrap_threshold: i64 = bs1 / 2 + bs1; // 3072
+
+    let center_w: i64 = bs1 / 2; // always reset to bs1/2 after each emit
+    let mut cursor: i64 = bs1 / 2;
+    let mut w: i32 = 0;
+
+    // Total accumulated movementW so we can index `marks` in absolute coords.
+    let mut total_shift: i64 = 0;
+
+    loop {
+        if samples_fed >= total_audio {
+            // EOS would be next. Return pcm_current as eofflag.
+            return pcm_current;
+        }
+        let chunk = chunk_size.min(total_audio - samples_fed);
+        pcm_current += chunk;
+        samples_fed += chunk;
+
+        if !preextrapolated {
+            if pcm_current > preextrap_threshold {
+                preextrapolated = true;
+            } else {
+                continue;
+            }
+        }
+
+        // Drain blocks (mirror vorbis_analysis_blockout loop)
+        loop {
+            // ve_envelope_search emulation:
+            //   first = ve->current/step (we don't track ve->current explicitly
+            //   since marks are precomputed; we only enforce the visibility
+            //   limit `last = pcm_current/step - VE_WIN` on the cursor walk).
+            let test_w = center_w + (if w == 1 { bs1 } else { bs0 }) / 4 + bs1 / 2 + bs0 / 4;
+            let last = pcm_current / step - ve_win;
+            let ve_current = last * step;
+
+            let mut j = cursor;
+            let mut search_result: i32 = -1;
+            let mut new_cursor = cursor;
+            while j < ve_current - step {
+                if j >= test_w {
+                    search_result = 1;
+                    break;
+                }
+                new_cursor = j;
+                let abs_idx = ((j + total_shift) / step) as usize;
+                if abs_idx < marks.len() && marks[abs_idx] && j > center_w {
+                    new_cursor = j;
+                    if j >= test_w {
+                        search_result = 1;
+                    } else {
+                        search_result = 0;
+                    }
+                    break;
+                }
+                j += step;
+            }
+            cursor = new_cursor;
+
+            // eofflag is 0 in this simulation (we return before signaling EOS).
+            // So bp == -1 means defer.
+            if search_result == -1 {
+                break;
+            }
+            let nw = search_result;
+
+            let bs_w = if w == 1 { bs1 } else { bs0 };
+            let bs_nw = if nw == 1 { bs1 } else { bs0 };
+            let center_next = center_w + bs_w / 4 + bs_nw / 4;
+            let blockbound = center_next + bs_nw / 2;
+            if pcm_current < blockbound {
+                break;
+            }
+
+            // Emit. Apply movementW shift (libvorbis "advance storage vectors").
+            let movement = center_next - bs1 / 2;
+            pcm_current -= movement;
+            cursor -= movement;
+            total_shift += movement;
+            w = nw;
+        }
+    }
+}
+
 /// Old, simplified pattern extractor — kept for reference.
 ///
 /// Returns a vec of bool: true = long block (W=1), false = short (W=0).

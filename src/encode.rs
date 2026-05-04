@@ -997,81 +997,8 @@ pub(crate) fn encode_with_serial_and_meta(
     // another block. Simulate that here: walk the W pattern, decrement a
     // "virtual pcm_current" by each block's advance, stop when the
     // remainder is too small for the next block's blockbound.
-    let eofflag_lpc = {
-        // Simulate libvorbis's chunk-by-chunk streaming. For ffmpeg with
-        // chunk=64 (READ_CHUNK from oracle-encoder), audio is fed 64 samples
-        // at a time and `vorbis_analysis_blockout` is called after each
-        // chunk to drain blocks. A block emits only when:
-        //   - `_ve_envelope_search` returns 0 or 1, which requires the
-        //     cursor to reach `testW = centerW + bs[W]/4 + bs[1]/2 + bs[0]/4`
-        //     within the searchable range. The cursor walk goes up to
-        //     `(pcm_current/searchstep - VE_WIN - 1) * searchstep`, so the
-        //     constraint is `testW < (pcm_current/64 - 4 - 1) * 64`, i.e.,
-        //     `pcm_current >= testW + 320`. Equivalently, the threshold is
-        //     a multiple of 64 just above `testW + 256`.
-        //   - The blockbound check passes (pcm_current >= blockbound).
-        // When the chunks run out and no more drains are possible, EOS
-        // signals and eofflag = pcm_current.
-        let chunk_size: i64 = 64;
-        let bs0 = SHORT_BLOCK as i64;
-        let bs1 = LONG_BLOCK as i64;
-        let mut pcm_current: i64 = CENTER_W as i64; // libvorbis init: pcm_current = centerW = bs[1]/2
-        let mut samples_fed: usize = 0;
-        let mut block_idx: usize = 0;
-        let total_audio = total_samples as i64;
-        let mut preextrapolated = false;
-        // libvorbis blockout: `if(!v->preextrapolate) return(0);` until pre-extrap
-        // helper has fired. Helper fires when `pcm_current - centerW > blocksizes[1]`,
-        // i.e., when pcm_current > 1024 + 2048 = 3072.
-        let preextrap_threshold = (CENTER_W + LONG_BLOCK) as i64;
-        loop {
-            if (samples_fed as i64) < total_audio {
-                let chunk = chunk_size.min(total_audio - samples_fed as i64);
-                pcm_current += chunk;
-                samples_fed += chunk as usize;
-            } else {
-                break;
-            }
-            if !preextrapolated {
-                if pcm_current > preextrap_threshold {
-                    preextrapolated = true;
-                } else {
-                    continue;
-                }
-            }
-            while block_idx < block_w.len() {
-                let w = block_w[block_idx];
-                let nw_idx = block_idx + 1;
-                let nw = if nw_idx < block_w.len() {
-                    block_w[nw_idx]
-                } else {
-                    1
-                };
-                let bs_w = if w == 1 { bs1 } else { bs0 };
-                let bs_nw = if nw == 1 { bs1 } else { bs0 };
-                let blockbound = 1024 + bs_w / 4 + 3 * bs_nw / 4;
-                if pcm_current < blockbound {
-                    break;
-                }
-                pcm_current -= bs_w / 4 + bs_nw / 4;
-                block_idx += 1;
-            }
-        }
-        pcm_current.max(0) as usize
-    };
-    // Workaround: my simulation underestimates eofflag for some short corpora
-    // (e.g. tube_splash gives 1207 but libvorbis sees 1847). The W-pattern
-    // matches libvorbis for 186/198 blocks; the 12 disagreements come in
-    // long↔short pairs (same long count, shifted by 1-2 indices) and
-    // suggest a subtle envelope-cursor evolution drift between my full-
-    // pattern model and libvorbis's incremental streaming. For the
-    // (audio_len, eofflag) signature of tube_splash specifically, hardcode
-    // the libvorbis-observed eofflag until the simulation is right.
-    let eofflag_lpc = if total_samples == 33207 {
-        1847
-    } else {
-        eofflag_lpc
-    };
+    let eofflag_lpc =
+        crate::envelope::simulate_eofflag(&env_marks, total_samples as i64, 64) as usize;
     let n_train_post = LONG_BLOCK.min(eofflag_lpc);
     if std::env::var("LW_DEBUG_EOFFLAG").is_ok() {
         eprintln!(
