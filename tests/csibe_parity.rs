@@ -141,3 +141,118 @@ fn csibe_parity_stereo44() {
         );
     }
 }
+
+/// Quietly check one file — returns Ok(()) on byte-identical, Err(reason) otherwise.
+fn check_one(rel: &str, channels: lewtoff::Channels) -> Result<(), String> {
+    let path: PathBuf = [CSIBE_ROOT, rel].iter().collect();
+    if !path.exists() {
+        return Err(format!("missing: {}", path.display()));
+    }
+    let ch_n: u16 = match channels {
+        lewtoff::Channels::Mono => 1,
+        lewtoff::Channels::Stereo => 2,
+    };
+    let samples = ffmpeg_decode(&path, 44100, ch_n);
+    if samples.is_empty() {
+        return Err("empty samples".into());
+    }
+    let oracle = oracle_encode(&samples, 44100, ch_n);
+    if oracle.len() < 18 {
+        return Err(format!("oracle output too short: {} bytes", oracle.len()));
+    }
+    let serial = u32::from_le_bytes(oracle[14..18].try_into().unwrap());
+    let vendor: &[u8] = b"Xiph.Org libVorbis I 20200704 (Reducing Environment)";
+    let lw = lewtoff::encode_with_serial_and_meta(
+        &samples,
+        lewtoff::SampleRate::Hz44100,
+        channels,
+        serial,
+        Some(vendor),
+        Some(b""),
+    );
+    if lw == oracle {
+        Ok(())
+    } else {
+        let mut first_diff = lw.len().min(oracle.len());
+        for i in 0..lw.len().min(oracle.len()) {
+            if lw[i] != oracle[i] {
+                first_diff = i;
+                break;
+            }
+        }
+        Err(format!(
+            "lw={} or={} delta={} first_diff={}",
+            lw.len(),
+            oracle.len(),
+            lw.len() as i64 - oracle.len() as i64,
+            first_diff
+        ))
+    }
+}
+
+/// Walk the csibe corpus and run `take_per_category` files from each category.
+/// Set CSIBE_TAKE=N to control sample size per category (default 5).
+#[test]
+#[ignore = "manual: large sweep over /Users/emoller/Downloads/csibe_raw"]
+fn csibe_parity_sweep_stereo44() {
+    let take_per_category: usize = std::env::var("CSIBE_TAKE")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(5);
+
+    let root = std::path::Path::new(CSIBE_ROOT);
+    let mut categories: Vec<std::path::PathBuf> = std::fs::read_dir(root)
+        .expect("csibe_raw dir")
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| p.is_dir())
+        .collect();
+    categories.sort();
+
+    let mut total = 0usize;
+    let mut passed = 0usize;
+    let mut by_category: std::collections::BTreeMap<String, (usize, usize)> = Default::default();
+    let mut failures: Vec<(String, String)> = Vec::new();
+
+    for cat in &categories {
+        let cat_name = cat.file_name().unwrap().to_string_lossy().to_string();
+        let mut files: Vec<std::path::PathBuf> = std::fs::read_dir(cat)
+            .expect("cat dir")
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|x| x == "wav"))
+            .collect();
+        files.sort();
+        for path in files.iter().take(take_per_category) {
+            let rel = path
+                .strip_prefix(root)
+                .unwrap()
+                .to_string_lossy()
+                .to_string();
+            total += 1;
+            match check_one(&rel, lewtoff::Channels::Stereo) {
+                Ok(()) => {
+                    passed += 1;
+                    by_category.entry(cat_name.clone()).or_default().0 += 1;
+                }
+                Err(why) => {
+                    failures.push((rel.clone(), why));
+                    by_category.entry(cat_name.clone()).or_default().1 += 1;
+                }
+            }
+        }
+    }
+
+    eprintln!("\n=== csibe sweep (stereo, 44.1k) ===");
+    eprintln!("Overall: {}/{} byte-identical", passed, total);
+    eprintln!("By category:");
+    for (cat, &(pass, fail)) in &by_category {
+        eprintln!("  {:25} {:3} pass, {:3} fail", cat, pass, fail);
+    }
+    if !failures.is_empty() {
+        eprintln!("\nFailures (showing up to 50):");
+        for (rel, why) in failures.iter().take(50) {
+            eprintln!("  {} — {}", rel, why);
+        }
+    }
+}

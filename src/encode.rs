@@ -833,44 +833,16 @@ pub(crate) fn encode_with_serial_and_meta(
     // libvorbis actually keys off; flat-but-loud signals like a constant
     // tone (snd_time_countdown.wav starts at 1341 and barely moves) are
     // PADDING in libvorbis even though their amplitude is non-trivial.
-    let range_impulse_threshold = 5000.0_f32 / 32768.0;
     let block_is_impulse: Vec<bool> = block_starts
         .iter()
         .zip(block_w.iter())
         .zip(block_curmarks.iter())
-        .enumerate()
-        .map(|(idx, ((&start, &w), &curmark))| {
+        .map(|((&start, &w), &curmark)| {
             if w != 0 {
                 false
             } else {
                 let center_w_in_env = (start + CENTER_W) as i64;
-                let env_says_impulse =
-                    crate::envelope::short_is_impulse(&env_marks, curmark, center_w_in_env);
-                if env_says_impulse {
-                    return true;
-                }
-                if idx == 0 {
-                    let sample_count = SHORT_BLOCK.min(total_samples);
-                    if sample_count > 0 {
-                        let mut maxv = f32::NEG_INFINITY;
-                        let mut minv = f32::INFINITY;
-                        for c in 0..ch {
-                            for i in 0..sample_count {
-                                let v = pcm_channels[c][i];
-                                if v > maxv {
-                                    maxv = v;
-                                }
-                                if v < minv {
-                                    minv = v;
-                                }
-                            }
-                        }
-                        if maxv - minv > range_impulse_threshold {
-                            return true;
-                        }
-                    }
-                }
-                false
+                crate::envelope::short_is_impulse(&env_marks, curmark, center_w_in_env)
             }
         })
         .collect();
