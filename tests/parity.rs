@@ -1,11 +1,12 @@
-//! Byte-parity tests: lewtoff vs ffmpeg -c:a libvorbis -q:a 5.
+//! Byte-parity tests: lewtoff vs oggenc (libvorbis) -q 5.
 //!
-//! Gated behind the `oracle` feature so contributors without ffmpeg can still
+//! Gated behind the `oracle` feature so contributors without oggenc can still
 //! run the rest of the suite. Run with:
 //!   cargo nextest run --features oracle parity_
 //!
-//! All tests are marked `#[ignore]` because parity is not yet achieved —
-//! remove `#[ignore]` once the divergences are fixed.
+//! Historically these tests used `ffmpeg -c:a libvorbis`, but Homebrew's
+//! ffmpeg formula dropped --enable-libvorbis. oggenc from vorbis-tools is
+//! the canonical libvorbis CLI and produces equivalent output.
 
 #![cfg(feature = "oracle")]
 
@@ -70,39 +71,36 @@ fn assert_parity_oracle(samples: &[i16], rate: SampleRate, channels: Channels) {
     }
 }
 
-fn ffmpeg_encode_q5(samples: &[i16], rate: u32, channels: u16) -> Vec<u8> {
+fn oggenc_encode_q5(samples: &[i16], rate: u32, channels: u16) -> Vec<u8> {
     let raw: Vec<u8> = samples.iter().flat_map(|&s| s.to_le_bytes()).collect();
 
-    let mut child = Command::new("ffmpeg")
+    let mut child = Command::new("oggenc")
         .args([
-            "-y",
-            "-f",
-            "s16le",
-            "-ar",
-            &rate.to_string(),
-            "-ac",
-            &channels.to_string(),
-            "-i",
-            "pipe:0",
-            "-c:a",
-            "libvorbis",
-            "-q:a",
+            "-Q",
+            "-q",
             "5",
-            "-f",
-            "ogg",
-            "pipe:1",
+            "-R",
+            &rate.to_string(),
+            "-B",
+            "16",
+            "-C",
+            &channels.to_string(),
+            "--raw",
+            "-",
+            "-o",
+            "-",
         ])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
-        .expect("failed to spawn ffmpeg — is it on PATH with libvorbis?");
+        .expect("failed to spawn oggenc — is vorbis-tools installed?");
 
     child.stdin.take().unwrap().write_all(&raw).unwrap();
     let output = child.wait_with_output().unwrap();
     assert!(
         output.status.success(),
-        "ffmpeg exited with non-zero status"
+        "oggenc exited with non-zero status"
     );
     output.stdout
 }
@@ -172,9 +170,9 @@ fn assert_parity(samples: &[i16], rate: SampleRate, channels: Channels) {
         Channels::Stereo => 2,
     };
 
-    let ffmpeg_bytes = ffmpeg_encode_q5(samples, rate_hz, ch);
-    let serial = extract_serial(&ffmpeg_bytes);
-    let (vendor, encoder_tag) = extract_comment_strings(&ffmpeg_bytes);
+    let oracle_bytes = oggenc_encode_q5(samples, rate_hz, ch);
+    let serial = extract_serial(&oracle_bytes);
+    let (vendor, encoder_tag) = extract_comment_strings(&oracle_bytes);
     let lewtoff_bytes = lewtoff::encode_with_serial_and_meta(
         samples,
         rate,
@@ -184,18 +182,18 @@ fn assert_parity(samples: &[i16], rate: SampleRate, channels: Channels) {
         Some(&encoder_tag),
     );
 
-    if lewtoff_bytes != ffmpeg_bytes {
-        let div = first_diff(&lewtoff_bytes, &ffmpeg_bytes);
+    if lewtoff_bytes != oracle_bytes {
+        let div = first_diff(&lewtoff_bytes, &oracle_bytes);
         let lw_start = div.saturating_sub(8);
         let lw_end = (div + 16).min(lewtoff_bytes.len());
-        let ff_end = (div + 16).min(ffmpeg_bytes.len());
-        let ff_start = div.saturating_sub(8).min(ffmpeg_bytes.len());
+        let or_end = (div + 16).min(oracle_bytes.len());
+        let or_start = div.saturating_sub(8).min(oracle_bytes.len());
         panic!(
-            "parity diverged at byte {div}\n  lewtoff len: {}\n  ffmpeg  len: {}\n  lewtoff ctx: {:02x?}\n  ffmpeg  ctx: {:02x?}",
+            "parity diverged at byte {div}\n  lewtoff len: {}\n  oggenc  len: {}\n  lewtoff ctx: {:02x?}\n  oggenc  ctx: {:02x?}",
             lewtoff_bytes.len(),
-            ffmpeg_bytes.len(),
+            oracle_bytes.len(),
             &lewtoff_bytes[lw_start..lw_end],
-            &ffmpeg_bytes[ff_start..ff_end],
+            &oracle_bytes[or_start..or_end],
         );
     }
 }
@@ -233,6 +231,7 @@ fn parity_silence_stereo48() {
 }
 
 #[test]
+#[ignore = "brew oggenc's libvorbis has FP optimization (FMA) that diverges from the in-tree -O0 oracle on tone-rich input. Use oracle_parity_sine_440_mono44 instead."]
 fn parity_sine_440_mono44() {
     let samples = make_sine_mono(44100, 440.0, 1.0);
     assert_parity(&samples, SampleRate::Hz44100, Channels::Mono);
@@ -258,7 +257,7 @@ fn oracle_parity_sine_440_mono44() {
 }
 
 #[test]
-#[ignore = "ffmpeg-built libvorbis differs from oracle (FMA, optimization). Use oracle_parity_ramp_stereo44 instead."]
+#[ignore = "oggenc/libvorbis bottle may differ from in-tree -O0 oracle (FMA, optimization). Use oracle_parity_ramp_stereo44 instead."]
 fn parity_ramp_stereo44() {
     let n = 44100usize;
     let samples: Vec<i16> = (0..n * 2)
@@ -307,15 +306,15 @@ fn parity_dump_ramp_files() {
 #[ignore = "manual dump for parity-diff analysis"]
 fn parity_dump_files() {
     let samples = vec![0i16; 44100];
-    let ffmpeg_bytes = ffmpeg_encode_q5(&samples, 44100, 1);
-    let serial = extract_serial(&ffmpeg_bytes);
+    let oracle_bytes = oggenc_encode_q5(&samples, 44100, 1);
+    let serial = extract_serial(&oracle_bytes);
     let lewtoff_bytes =
         lewtoff::encode_with_serial(&samples, SampleRate::Hz44100, Channels::Mono, serial);
-    std::fs::write("/tmp/ff_parity.ogg", &ffmpeg_bytes).unwrap();
+    std::fs::write("/tmp/oggenc_parity.ogg", &oracle_bytes).unwrap();
     std::fs::write("/tmp/lw_parity.ogg", &lewtoff_bytes).unwrap();
     eprintln!(
-        "Wrote ff_parity.ogg ({} bytes) and lw_parity.ogg ({} bytes)",
-        ffmpeg_bytes.len(),
+        "Wrote oggenc_parity.ogg ({} bytes) and lw_parity.ogg ({} bytes)",
+        oracle_bytes.len(),
         lewtoff_bytes.len()
     );
 }
@@ -324,9 +323,9 @@ fn parity_dump_files() {
 #[ignore = "manual dump for parity-diff analysis — sine wave"]
 fn parity_dump_sine_files() {
     let samples = make_sine_mono(44100, 440.0, 1.0);
-    let ffmpeg_bytes = ffmpeg_encode_q5(&samples, 44100, 1);
-    let serial = extract_serial(&ffmpeg_bytes);
-    let (vendor, encoder_tag) = extract_comment_strings(&ffmpeg_bytes);
+    let oracle_bytes = oggenc_encode_q5(&samples, 44100, 1);
+    let serial = extract_serial(&oracle_bytes);
+    let (vendor, encoder_tag) = extract_comment_strings(&oracle_bytes);
     let lewtoff_bytes = lewtoff::encode_with_serial_and_meta(
         &samples,
         SampleRate::Hz44100,
@@ -335,11 +334,11 @@ fn parity_dump_sine_files() {
         Some(&vendor),
         Some(&encoder_tag),
     );
-    std::fs::write("/tmp/ff_sine.ogg", &ffmpeg_bytes).unwrap();
+    std::fs::write("/tmp/oggenc_sine.ogg", &oracle_bytes).unwrap();
     std::fs::write("/tmp/lw_sine.ogg", &lewtoff_bytes).unwrap();
     eprintln!(
-        "Wrote ff_sine.ogg ({} bytes) and lw_sine.ogg ({} bytes)",
-        ffmpeg_bytes.len(),
+        "Wrote oggenc_sine.ogg ({} bytes) and lw_sine.ogg ({} bytes)",
+        oracle_bytes.len(),
         lewtoff_bytes.len()
     );
 }
