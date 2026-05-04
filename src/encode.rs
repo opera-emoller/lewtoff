@@ -32,6 +32,17 @@ const CENTER_W: usize = LONG_HALF;
 const Q5_NOISEMAXSUPP: f32 = f32::from_bits(0xc1f00005);
 const Q5_MAX_CURVE_DB: f32 = 105.0;
 
+// tone_masteratt post-q-interpolation. _psy_tone_masteratt_44[6]={20,6,-6},
+// [7]={20,3,-10}; q=0.5+ε interpolation between rows 6 and 7 lands a sub-ULP
+// fraction off the row-6 values. All four blocktypes (long, impulse, short
+// padding, transition) read the SAME tone_masteratt template at their `is`,
+// so the f32-correct values must be used in all four make_q5_psy_* builders.
+const Q5_TONE_MASTERATT: [f32; 3] = [
+    20.0,
+    f32::from_bits(0x40bffffa), // ~5.999996
+    f32::from_bits(0xc0c00008), // ~-6.000004
+];
+
 // 17-entry tone-attenuation table used by all four make_q5_psy_* builders.
 // Post-interpolation values libvorbis produces for q=0.5 after its
 // `quality += 0.0000001` adjustment. Bits dumped from the oracle-encoder.
@@ -162,7 +173,7 @@ fn make_q5_psy() -> VorbisInfoPsy {
 
     // Tone mask params: post-interpolation values from oracle dump for q=0.5
     // (between row6 [20,6,-6] and row7 [20,3,-10] with ds≈1e-6).
-    vi.tone_masteratt = [20.0, f32::from_bits(0x40bffffa), f32::from_bits(0xc0c00008)];
+    vi.tone_masteratt = Q5_TONE_MASTERATT;
     vi.tone_centerboost = 0.0;
     vi.tone_decay = 0.0;
     vi.tone_abs_limit = f32::from_bits(0xc1f00005); // ~-30.00000381
@@ -271,7 +282,7 @@ fn make_q5_psy_impulse() -> VorbisInfoPsy {
     vi.ath_maxatt = -140.0;
 
     // Interpolated at q=0.5 (ds≈1e-6) between row6 [20, 6, -6] and row7 [20, 3, -10]
-    vi.tone_masteratt = [20.0, f32::from_bits(0x40bffffa), f32::from_bits(0xc0c00008)];
+    vi.tone_masteratt = Q5_TONE_MASTERATT;
     vi.tone_centerboost = 0.0;
     vi.tone_decay = 0.0;
     vi.tone_abs_limit = f32::from_bits(0xc1f00005); // ~-30.00000381 from interp
@@ -375,7 +386,7 @@ fn make_q5_psy_short() -> VorbisInfoPsy {
     vi.ath_maxatt = -140.0;
 
     // Tone mask: _psy_tone_masteratt_44[6] = {{20,6,-6},0,0}
-    vi.tone_masteratt = [20.0, 6.0, -6.0];
+    vi.tone_masteratt = Q5_TONE_MASTERATT;
     vi.tone_centerboost = 0.0;
     vi.tone_decay = 0.0;
     vi.tone_abs_limit = -30.0; // _psy_tone_suppress[6] = -30
@@ -403,13 +414,46 @@ fn make_q5_psy_short() -> VorbisInfoPsy {
         -14.0, -14.0, -14.0, -14.0, -14.0, -14.0, -14.0, -10.0, -4.0, 0.0, 0.0, 0.0, 0.0, 4.0, 6.0,
         6.0, 12.0,
     ];
+    // Post q-interpolation values from libvorbis psy[1] (block=1, SHORT PADDING)
+    // for q=0.5+ε. Integer rows are exact f32; fractional ULP perturbations come
+    // from the quality-interpolation between _psy_noisebias_padding[6] and [7].
     let noiseoff_1: [f32; P_BANDS] = [
-        -26.0, -26.0, -26.0, -26.0, -26.0, -24.0, -22.0, -16.0, -12.0, -6.0, -3.0, -3.0, -3.0,
-        -3.0, -2.0, 0.0, 4.0,
+        -26.0,
+        -26.0,
+        -26.0,
+        -26.0,
+        -26.0,
+        f32::from_bits(0xc1c00003),
+        f32::from_bits(0xc1b00001),
+        f32::from_bits(0xc1800002),
+        f32::from_bits(0xc1400002),
+        f32::from_bits(0xc0c00004),
+        f32::from_bits(0xc0400004),
+        f32::from_bits(0xc0400004),
+        f32::from_bits(0xc0400004),
+        f32::from_bits(0xc0400004),
+        f32::from_bits(0xc0000004),
+        f32::from_bits(0xb5800000),
+        4.0,
     ];
     let noiseoff_2: [f32; P_BANDS] = [
-        -28.0, -28.0, -28.0, -28.0, -28.0, -26.0, -24.0, -18.0, -14.0, -10.0, -10.0, -10.0, -10.0,
-        -10.0, -8.0, -5.0, -3.0,
+        -28.0,
+        -28.0,
+        -28.0,
+        -28.0,
+        -28.0,
+        f32::from_bits(0xc1d00002),
+        f32::from_bits(0xc1c00001),
+        f32::from_bits(0xc1900001),
+        f32::from_bits(0xc1600002),
+        f32::from_bits(0xc1200003),
+        f32::from_bits(0xc1200003),
+        f32::from_bits(0xc1200003),
+        f32::from_bits(0xc1200003),
+        f32::from_bits(0xc1200003),
+        f32::from_bits(0xc1000003),
+        f32::from_bits(0xc0a00006),
+        f32::from_bits(0xc040000c),
     ];
     vi.noiseoff[0] = noiseoff_0;
     vi.noiseoff[1] = noiseoff_1;
@@ -450,7 +494,7 @@ fn make_q5_psy_transition() -> VorbisInfoPsy {
     vi.ath_maxatt = -140.0;
 
     // Tone mask: _psy_tone_masteratt_44[6] = {{20,6,-6},0,0}
-    vi.tone_masteratt = [20.0, 6.0, -6.0];
+    vi.tone_masteratt = Q5_TONE_MASTERATT;
     vi.tone_centerboost = 0.0;
     vi.tone_decay = 0.0;
     vi.tone_abs_limit = -30.0;
