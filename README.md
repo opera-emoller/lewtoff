@@ -5,7 +5,8 @@ output to libvorbis 1.3.7 at quality Q5 for a constrained input space.
 Named after [lewton](https://github.com/RustAudio/lewton) — the pure-Rust
 Vorbis decoder. lewtoff is its encoder counterpart.
 
-`#![forbid(unsafe_code)]`. One runtime dependency (the `ogg` crate).
+The crate forbids `unsafe` and pulls in a single runtime dependency
+(the `ogg` crate, for page framing and CRC).
 
 ## Status
 
