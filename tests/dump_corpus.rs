@@ -44,8 +44,10 @@ fn oracle_encode(samples: &[i16], rate: u32, ch: u16) -> Vec<u8> {
 #[test]
 #[ignore = "manual: dumps a corpus file's lw + oracle ogg to /tmp/"]
 fn dump_corpus_one() {
-    let name = std::env::var("CORPUS").unwrap_or_else(|_| "snd_ui_input_confirm.wav".into());
-    let path = format!("sounds/{name}");
+    // CORPUS=<relative path under corpus/>, e.g. CORPUS=beach_bro/snd_smudge.wav
+    let name =
+        std::env::var("CORPUS").unwrap_or_else(|_| "beach_bro/snd_ui_input_confirm.wav".into());
+    let path = format!("corpus/{name}");
     let samples = ffmpeg_decode(&path, 44100, 2);
     let oracle = oracle_encode(&samples, 44100, 2);
     let serial = u32::from_le_bytes(oracle[14..18].try_into().unwrap());

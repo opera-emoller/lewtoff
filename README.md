@@ -10,12 +10,15 @@ The crate forbids `unsafe` and pulls in a single runtime dependency
 
 ## Status
 
-14/14 corpus files in `tests/parity.rs::corpus_parity_44_stereo` and all
-synthetic parity tests (silence, sine 440, ramps, mono+stereo at 44.1k
-and 48k) match libvorbis 1.3.7 byte-for-byte. The EOS `eofflag` /
-post-extrap `n_train` derivation runs a faithful chunk-by-chunk
-streaming simulation of libvorbis's `vorbis_analysis_blockout` (see
-`envelope::simulate_eofflag`) so no per-input hardcodes are needed.
+All synthetic parity tests (silence, sine 440, ramps, mono+stereo at
+44.1k and 48k) match libvorbis 1.3.7 byte-for-byte. A real-audio corpus
+sweep (`tests/corpus_sweep.rs::corpus_parity_sweep`) walks any
+`<repo_root>/corpus/` directory the contributor has symlinked in and
+asserts the same parity for every file recursively; the most recent
+sweep over a 5954-file corpus passed 100% byte-identical. The EOS
+`eofflag` / post-extrap `n_train` derivation runs a faithful chunk-by-
+chunk streaming simulation of libvorbis's `vorbis_analysis_blockout`
+(see `envelope::simulate_eofflag`) so no per-input hardcodes are needed.
 
 ## Use
 
@@ -63,9 +66,17 @@ Then:
 cargo nextest run --features oracle parity_
 ```
 
-Audio used by `corpus_parity_44_stereo` is staged under `/sounds`
-locally and is not committed (gitignored — see `tests/parity.rs` for
-the file list).
+For the `corpus_parity_sweep` test, symlink your audio corpus at
+`<repo_root>/corpus/` and run
+
+```sh
+cargo nextest run --features oracle --no-tests=warn corpus_parity_sweep -- --include-ignored
+```
+
+The directory is gitignored; the sweep walks it recursively and accepts
+`.wav`, `.mp3`, `.ogg`, `.flac`, `.m4a`, `.aif`, and `.aiff`. Files are
+decoded via `ffmpeg` to s16le 44.1kHz stereo before encoding. Set
+`CORPUS_LIMIT=N` to test only the first N files for a quick smoke run.
 
 ## Tests
 

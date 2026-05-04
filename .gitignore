@@ -6,10 +6,10 @@
 /tests/fixtures/oracle-out/*.ogg
 !/tests/fixtures/oracle-out/.keep
 
-# Audio test corpus is too large/licence-heavy to commit. Each contributor
-# stages their own files under /sounds and runs corpus_parity_44_stereo
-# manually.
-/sounds
+# Audio test corpus is too large/licence-heavy to commit. Contributors
+# symlink /corpus to a sound corpus they own (manually run
+# `corpus_parity_sweep` from tests/corpus_sweep.rs).
+/corpus
 
 # Ad-hoc debug binaries built from tools/debug-libvorbis-dump and
 # tools/oracle-encoder. Only `harness` (and its .dSYM) is intentionally
