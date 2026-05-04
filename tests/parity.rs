@@ -431,8 +431,25 @@ fn run_corpus_parity(name: &str, rate: SampleRate, channels: Channels) {
 
 #[test]
 fn corpus_parity_44_stereo() {
+    // Audio corpus files are gitignored — each contributor stages them in
+    // /sounds locally. Skip with a notice if none are present (e.g. CI on
+    // a fresh checkout). If any are present, only those are run; missing
+    // files don't count as failures.
+    let present: Vec<&str> = CORPUS_44_STEREO
+        .iter()
+        .copied()
+        .filter(|name| corpus_path(name).exists())
+        .collect();
+    if present.is_empty() {
+        eprintln!(
+            "no corpus files staged in {}; skipping corpus_parity_44_stereo",
+            corpus_path("").parent().unwrap().display()
+        );
+        return;
+    }
+
     let mut failures = Vec::new();
-    for &name in CORPUS_44_STEREO {
+    for &name in &present {
         let result = std::panic::catch_unwind(|| {
             run_corpus_parity(name, SampleRate::Hz44100, Channels::Stereo);
         });
@@ -454,7 +471,7 @@ fn corpus_parity_44_stereo() {
         panic!(
             "{}/{} corpus files diverged:\n  {:?}\nfirst failure ({}):\n{}",
             failures.len(),
-            CORPUS_44_STEREO.len(),
+            present.len(),
             summary,
             first.0,
             first.1
