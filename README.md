@@ -99,4 +99,8 @@ on — live in the commit log.
 
 ## License
 
-MIT OR Apache-2.0, matching the libvorbis BSD lineage.
+Apache-2.0 (see `LICENSE`). lewtoff is a clean-room port of portions of
+libvorbis 1.3.7, which is BSD-3-Clause from the Xiph.Org Foundation; the
+upstream attribution is in `NOTICE`. The vendored libvorbis source under
+`tools/debug-libvorbis-dump/vendored-libvorbis/` retains its own
+`COPYING`.

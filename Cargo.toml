@@ -6,9 +6,9 @@ name = "lewtoff"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.80"
-license = "MIT OR Apache-2.0"
+license = "Apache-2.0"
 description = "Pure-Rust Ogg Vorbis encoder, byte-identical to libvorbis Q5."
-repository = "https://github.com/<owner>/lewtoff"
+repository = "https://github.com/opera-emoller/lewtoff"
 categories = ["multimedia::audio", "encoding"]
 keywords = ["vorbis", "ogg", "audio", "encoder", "lossy"]
 
