@@ -47,6 +47,17 @@ test-verbose:
 parity:
     cargo nextest run --features oracle --no-tests=warn parity_
 
+# Corpus parity sweep: walks <repo_root>/corpus/ recursively and asserts
+# byte-identical parity for every audio file (wav/mp3/ogg/flac/m4a/aif/aiff).
+# Symlink your corpus there first, e.g.
+#     ln -s /path/to/sounds corpus
+# Pass a number as the first arg to limit the file count for smoke runs:
+#     just corpus           # sweep everything
+#     just corpus 100       # first 100 files (sorted)
+corpus limit="":
+    CORPUS_LIMIT={{limit}} cargo nextest run --features oracle --no-tests=warn \
+        --run-ignored=only -E 'test(corpus_parity_sweep)'
+
 # Per-chunk diff helper for parity failures.
 # Usage: just parity-diff input.s16le 44100 mono
 parity-diff input rate channels:

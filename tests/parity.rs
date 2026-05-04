@@ -70,40 +70,6 @@ fn assert_parity_oracle(samples: &[i16], rate: SampleRate, channels: Channels) {
     }
 }
 
-/// Decode an audio file (any format ffmpeg understands) to interleaved
-/// `i16` PCM at the given `rate` and `channels`, using ffmpeg's `aresample`
-/// filter for sample-rate / channel-count conversion. Returns the samples
-/// the encoder will see.
-fn ffmpeg_decode_to_pcm(path: &std::path::Path, rate: u32, channels: u16) -> Vec<i16> {
-    let out = Command::new("ffmpeg")
-        .args(["-hide_banner", "-loglevel", "error", "-i"])
-        .arg(path)
-        .args([
-            "-f",
-            "s16le",
-            "-ac",
-            &channels.to_string(),
-            "-ar",
-            &rate.to_string(),
-            "-",
-        ])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output()
-        .expect("ffmpeg decode failed to spawn");
-    assert!(
-        out.status.success(),
-        "ffmpeg decode of {} failed: {}",
-        path.display(),
-        String::from_utf8_lossy(&out.stderr)
-    );
-    let bytes = out.stdout;
-    bytes
-        .chunks_exact(2)
-        .map(|c| i16::from_le_bytes([c[0], c[1]]))
-        .collect()
-}
-
 fn ffmpeg_encode_q5(samples: &[i16], rate: u32, channels: u16) -> Vec<u8> {
     let raw: Vec<u8> = samples.iter().flat_map(|&s| s.to_le_bytes()).collect();
 
