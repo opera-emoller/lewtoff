@@ -717,14 +717,23 @@ fn seed_curve(
     let lo = i_lo.max(post0).min(post1);
     let hi = i_hi.max(lo).min(post1);
 
-    let mut seedptr = seedptr0 + lp * (lo as i64 - post0 as i64);
-    for i in lo..hi {
-        let lin = amp + curve[i];
-        let sp = seedptr as usize;
-        if seed[sp] < lin {
-            seed[sp] = lin;
+    if hi <= lo {
+        return;
+    }
+    // Re-slice seed[] to the strided window we will actually touch
+    // ([sp_lo ..= sp_max]) — checks the upper bound once. chunks_mut(lp)
+    // then yields non-empty subslices whose [0] is the next stored cell,
+    // letting the compiler elide per-iter bounds checks on `seed`.
+    let lp_us = lp as usize;
+    let sp_lo = (seedptr0 + lp * (lo as i64 - post0 as i64)) as usize;
+    let sp_max = sp_lo + (hi - lo - 1) * lp_us;
+    let win = &mut seed[sp_lo..=sp_max];
+    for (chunk, &c) in win.chunks_mut(lp_us).zip(&curve[lo..hi]) {
+        let lin = amp + c;
+        let dst = &mut chunk[0];
+        if *dst < lin {
+            *dst = lin;
         }
-        seedptr += lp;
     }
 }
 
