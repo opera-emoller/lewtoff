@@ -1163,7 +1163,8 @@ fn bark_noise_hybridmp(n: usize, b: &[i64], f: &[f32], noise: &mut [f32], offset
 
 pub fn vp_noisemask(p: &VorbisLookPsy, logmdct: &[f32], logmask: &mut [f32]) {
     let n = p.n;
-    let mut work = vec![0.0_f32; n];
+    let mut work_arr = [0.0_f32; MAX_OCTAVE_LINES];
+    let work = &mut work_arr[..n];
 
     bark_noise_hybridmp(n, &p.bark, logmdct, logmask, 140.0, -1);
 
@@ -1171,7 +1172,7 @@ pub fn vp_noisemask(p: &VorbisLookPsy, logmdct: &[f32], logmask: &mut [f32]) {
         work[i] = logmdct[i] - logmask[i];
     }
 
-    bark_noise_hybridmp(n, &p.bark, &work, logmask, 0.0, p.vi.noisewindowfixed);
+    bark_noise_hybridmp(n, &p.bark, work, logmask, 0.0, p.vi.noisewindowfixed);
 
     for i in 0..n {
         work[i] = logmdct[i] - work[i];
