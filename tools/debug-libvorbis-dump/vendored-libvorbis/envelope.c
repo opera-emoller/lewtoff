@@ -263,6 +263,8 @@ static int seq=0;
 static ogg_int64_t totalshift=-1024;
 #endif
 
+long _lv_total_shift = 0; /* monotonic absolute shift in samples (debug) */
+
 long _ve_envelope_search(vorbis_dsp_state *v){
   vorbis_info *vi=v->vi;
   codec_setup_info *ci=vi->codec_setup;
@@ -305,7 +307,7 @@ long _ve_envelope_search(vorbis_dsp_state *v){
 
     if(ret&4)ve->stretch=-1;
     if(ret){
-      fprintf(stderr,"C_ENV_MARK j=%ld ret=%d stretch=%d\n",j,ret,ve->stretch);
+      fprintf(stderr,"C_ENV_MARK abs_j=%ld j=%ld ret=%d stretch=%d\n",j+_lv_total_shift/ve->searchstep,j,ret,ve->stretch);
     }
   }
 
@@ -396,23 +398,26 @@ int _ve_envelope_mark(vorbis_dsp_state *v){
   }
 
   {
-    static int n_em=0;
-    if(n_em<8){
-      fprintf(stderr,"C_VE_MARK centerW=%ld beginW=%ld endW=%ld curmark=%ld W=%d\n",
-              centerW,beginW,endW,ve->curmark,v->W);
-      n_em++;
-    }
-  }
-
-  if(ve->curmark>=beginW && ve->curmark<endW)return(1);
-  {
+    int impulse=0;
     long first=beginW/ve->searchstep;
     long last=endW/ve->searchstep;
     long i;
-    for(i=first;i<last;i++)
-      if(ve->mark[i])return(1);
+    if(ve->curmark>=beginW && ve->curmark<endW)impulse=1;
+    if(!impulse){
+      for(i=first;i<last;i++)
+        if(ve->mark[i]){impulse=1;break;}
+    }
+    long abs_first=first+_lv_total_shift/ve->searchstep;
+    long abs_curmark=(ve->curmark>=0)?ve->curmark+_lv_total_shift:-1;
+    fprintf(stderr,"C_VE_MARK shift=%ld curmark_abs=%ld absMarks[%ld..%ld]=[%d %d %d %d] -> %s\n",
+            _lv_total_shift,abs_curmark,abs_first,abs_first+4,
+            (first<ve->storage)?ve->mark[first]:-1,
+            (first+1<ve->storage)?ve->mark[first+1]:-1,
+            (first+2<ve->storage)?ve->mark[first+2]:-1,
+            (first+3<ve->storage)?ve->mark[first+3]:-1,
+            impulse?"IMPULSE":"PADDING");
+    return(impulse);
   }
-  return(0);
 }
 
 void _ve_envelope_shift(envelope_lookup *e,long shift){
@@ -434,4 +439,5 @@ void _ve_envelope_shift(envelope_lookup *e,long shift){
   if(e->curmark>=0)
     e->curmark-=shift;
   e->cursor-=shift;
+  _lv_total_shift+=shift;
 }

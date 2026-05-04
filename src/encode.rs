@@ -601,7 +601,7 @@ pub(crate) fn pre_extrap_for_test(pcm: &[f32]) -> [f32; CENTER_W] {
 
 #[cfg(test)]
 pub(crate) fn post_extrap_for_test(pcm: &[f32]) -> Vec<f32> {
-    postextrapolate_channel(pcm)
+    postextrapolate_channel_with_n(pcm, LONG_BLOCK.min(pcm.len()))
 }
 
 /// Port of libvorbis post-stream LPC extrapolation (block.c lines 487-527).
@@ -613,11 +613,7 @@ pub(crate) fn post_extrap_for_test(pcm: &[f32]) -> Vec<f32> {
 const LPC_ORDER_POST: usize = 32;
 const POST_EXTRAPOLATE_LEN: usize = LONG_BLOCK * 3; // libvorbis blocksizes[1]*3 = 6144
 
-fn postextrapolate_channel(pcm: &[f32]) -> Vec<f32> {
-    postextrapolate_channel_with_n(pcm, LONG_BLOCK.min(pcm.len()))
-}
-
-/// Like [`postextrapolate_channel`] but pins the LPC training-data length.
+/// Post-extrapolate the audio with an explicit LPC training-data length.
 ///
 /// libvorbis sets `n = min(eofflag, blocksizes[1])` where `eofflag` is the
 /// remaining buffered audio at the time `vorbis_analysis_wrote(0)` is called.
@@ -763,28 +759,56 @@ pub(crate) fn encode_with_serial_and_meta(
     // libvorbis's envelope-driven `_ve_envelope_search` rule across all
     // marks. The pattern is a Vec<i32> of 0=short / 1=long, one entry per
     // emitted block (including any EOS flush blocks).
-    let (block_w, env_marks, block_curmarks): (Vec<i32>, Vec<bool>, Vec<i64>) = {
-        let lpc_train_end = 2112usize.min(total_samples);
+    // libvorbis's envelope_search reads its own current pcm buffer, which
+    // includes post-extrapolated samples after EOS. The post-extrap LPC
+    // training window is `min(eofflag, blocksizes[1])` where eofflag is
+    // pcm_current at vorbis_analysis_wrote(0) — i.e. the residual buffer
+    // after pre-EOS drains. For long streams that's always == 2048; for
+    // short streams it's smaller, and using the wrong n_train produces
+    // diverging post-extrap samples → diverging envelope marks at the very
+    // end of the stream. We resolve the chicken-and-egg (eofflag depends on
+    // marks via `simulate_eofflag`, marks depend on env_pcm post-extrap
+    // which depends on eofflag) by iterating to a fixed point. In practice
+    // 2 passes suffice (long streams converge in 1 since n_train clamps to
+    // 2048 either way).
+    let lpc_train_end = 2112usize.min(total_samples);
+    let pre_per_channel: Vec<[f32; CENTER_W]> = (0..ch)
+        .map(|c| preextrapolate_channel(&pcm_channels[c][..lpc_train_end]))
+        .collect();
+    let build_env_pcm = |n_train: usize| -> Vec<Vec<f32>> {
         let mut env_pcm: Vec<Vec<f32>> = Vec::with_capacity(ch);
         for c in 0..ch {
-            let pre = preextrapolate_channel(&pcm_channels[c][..lpc_train_end]);
-            let post = postextrapolate_channel(&pcm_channels[c]);
+            let post = postextrapolate_channel_with_n(&pcm_channels[c], n_train);
             let mut buf = Vec::with_capacity(CENTER_W + total_samples + POST_EXTRAPOLATE_LEN);
             for k in 0..CENTER_W {
-                buf.push(pre[CENTER_W - 1 - k]);
+                buf.push(pre_per_channel[c][CENTER_W - 1 - k]);
             }
             buf.extend_from_slice(&pcm_channels[c]);
             buf.extend_from_slice(&post);
             env_pcm.push(buf);
         }
+        env_pcm
+    };
+
+    let mut n_train_env = LONG_BLOCK.min(total_samples);
+    let (block_w, env_marks, block_curmarks): (Vec<i32>, Vec<bool>, Vec<i64>) = loop {
+        let env_pcm = build_env_pcm(n_train_env);
         let marks = crate::envelope::compute_marks(&env_pcm, &gi);
-        // libvorbis terminates emission at v->centerW >= v->eofflag. eofflag
-        // is the END OF REAL AUDIO position. In our env_pcm coordinate that's
-        // CENTER_W (pre-extrap) + total_samples; post-extrap content extends
-        // the marks array but doesn't extend the eofflag.
-        let n_eof = (CENTER_W + total_samples) as i64;
-        let (pattern, curmarks) = crate::envelope::full_w_pattern_with_curmark(&marks, n_eof);
-        (pattern, marks, curmarks)
+        // Re-derive eofflag using these marks; if it implies a different
+        // n_train, rebuild env_pcm (and thus the marks) once more.
+        let eof_candidate =
+            crate::envelope::simulate_eofflag(&marks, total_samples as i64, 64) as usize;
+        let n_train_next = LONG_BLOCK.min(eof_candidate);
+        if n_train_next == n_train_env {
+            // libvorbis terminates emission at v->centerW >= v->eofflag.
+            // eofflag is the END OF REAL AUDIO position. In env_pcm coords
+            // that's CENTER_W (pre-extrap) + total_samples; post-extrap
+            // content extends the marks array but doesn't extend eofflag.
+            let n_eof = (CENTER_W + total_samples) as i64;
+            let (pattern, curmarks) = crate::envelope::full_w_pattern_with_curmark(&marks, n_eof);
+            break (pattern, marks, curmarks);
+        }
+        n_train_env = n_train_next;
     };
 
     // Map W-flag sequence to per-block sample positions (block_start). Each

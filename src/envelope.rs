@@ -155,28 +155,7 @@ impl EnvelopeLookup {
         }
         let mut vec_in: [f32; ENV_WINLENGTH] = vec;
         let mut vec_out = [0.0f32; ENV_WINLENGTH / 2];
-        if crate::debug_flag!("LW_DEBUG_AMP_DBG") {
-            use std::sync::atomic::{AtomicUsize, Ordering};
-            static N: AtomicUsize = AtomicUsize::new(0);
-            let n = N.fetch_add(1, Ordering::Relaxed);
-            if (32..=38).contains(&n) {
-                let mut s = format!("R_AMP_DBG call={} windowed_pcm_first16:", n);
-                for z in 0..16 {
-                    s.push_str(&format!(" 0x{:08x}", vec_in[z].to_bits()));
-                }
-                eprintln!("{}", s);
-            }
-            mdct_forward_envelope(&vec_in, &mut vec_out);
-            if (32..=38).contains(&n) {
-                let mut s = format!("R_AMP_DBG call={} mdct_out_first16:", n);
-                for z in 0..16 {
-                    s.push_str(&format!(" 0x{:08x}", vec_out[z].to_bits()));
-                }
-                eprintln!("{}", s);
-            }
-        } else {
-            mdct_forward_envelope(&vec_in, &mut vec_out);
-        }
+        mdct_forward_envelope(&vec_in, &mut vec_out);
         // Reuse vec to hold output spread/limited values across band loop:
         // first half stores spreaded values, second half unused.
         let _ = &mut vec_in;
