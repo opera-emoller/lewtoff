@@ -915,181 +915,183 @@ fn bark_noise_hybridmp(n: usize, b: &[i64], f: &[f32], noise: &mut [f32], offset
     let big_y = &mut big_y_arr[..n];
     let big_xy = &mut big_xy_arr[..n];
 
-    let mut tn: f32;
-    let mut tx: f32;
-    let mut txx: f32;
-    let mut ty: f32;
-    let mut txy: f32;
+    // Prefix-sum loops scoped so the running accumulators live in registers
+    // (no per-iter spills to function-scope memory slots).
+    {
+        let mut tn = 0.0_f32;
+        let mut tx = 0.0_f32;
+        let mut txx = 0.0_f32;
+        let mut ty = 0.0_f32;
+        let mut txy = 0.0_f32;
 
-    let mut r = 0.0_f32;
-    let mut big_a = 0.0_f32;
-    let mut big_b = 0.0_f32;
-    let mut big_d = 1.0_f32;
-
-    tn = 0.0;
-    tx = 0.0;
-    txx = 0.0;
-    ty = 0.0;
-    txy = 0.0;
-
-    let mut y = f[0] + offset;
-    if y < 1.0 {
-        y = 1.0;
-    }
-    let w = y * y * 0.5;
-    tn += w;
-    tx += w;
-    ty += w * y;
-
-    big_n[0] = tn;
-    big_x[0] = tx;
-    big_xx[0] = txx;
-    big_y[0] = ty;
-    big_xy[0] = txy;
-
-    let mut x = 1.0_f32;
-    for i in 1..n {
-        let mut y = f[i] + offset;
+        let mut y = f[0] + offset;
         if y < 1.0 {
             y = 1.0;
         }
-        let w = y * y;
+        let w = y * y * 0.5;
         tn += w;
-        tx += w * x;
-        txx += w * x * x;
+        tx += w;
         ty += w * y;
-        txy += w * x * y;
 
-        big_n[i] = tn;
-        big_x[i] = tx;
-        big_xx[i] = txx;
-        big_y[i] = ty;
-        big_xy[i] = txy;
+        big_n[0] = tn;
+        big_x[0] = tx;
+        big_xx[0] = txx;
+        big_y[0] = ty;
+        big_xy[0] = txy;
 
-        x += 1.0;
+        let mut x = 1.0_f32;
+        for i in 1..n {
+            let mut y = f[i] + offset;
+            if y < 1.0 {
+                y = 1.0;
+            }
+            let w = y * y;
+            tn += w;
+            tx += w * x;
+            txx += w * x * x;
+            ty += w * y;
+            txy += w * x * y;
+
+            big_n[i] = tn;
+            big_x[i] = tx;
+            big_xx[i] = txx;
+            big_y[i] = ty;
+            big_xy[i] = txy;
+
+            x += 1.0;
+        }
     }
 
     let mut i = 0usize;
-    x = 0.0;
-    while i < n {
-        let lo = b[i] >> 16;
-        let hi = (b[i] & 0xffff) as usize;
+    let mut x = 0.0_f32;
+    // Loops 2-3 share big_a/big_b/big_d/r (loop 3 reads them after loop 2 exits).
+    // Scope the locals here so they don't get spilled to function-scope memory.
+    {
+        let mut big_a = 0.0_f32;
+        let mut big_b = 0.0_f32;
+        let mut big_d = 1.0_f32;
+        let mut r = 0.0_f32;
 
-        if lo >= 0 || (-lo) as usize >= n {
-            break;
-        }
-        if hi >= n {
-            break;
-        }
+        while i < n {
+            let lo = b[i] >> 16;
+            let hi = (b[i] & 0xffff) as usize;
 
-        let nlo = (-lo) as usize;
-        tn = big_n[hi] + big_n[nlo];
-        tx = big_x[hi] - big_x[nlo];
-        txx = big_xx[hi] + big_xx[nlo];
-        ty = big_y[hi] + big_y[nlo];
-        txy = big_xy[hi] - big_xy[nlo];
+            if lo >= 0 || (-lo) as usize >= n {
+                break;
+            }
+            if hi >= n {
+                break;
+            }
 
-        big_a = ty * txx - tx * txy;
-        big_b = tn * txy - tx * ty;
-        big_d = tn * txx - tx * tx;
-        r = (big_a + x * big_b) / big_d;
-        if r < 0.0 {
-            r = 0.0;
-        }
+            let nlo = (-lo) as usize;
+            let tn = big_n[hi] + big_n[nlo];
+            let tx = big_x[hi] - big_x[nlo];
+            let txx = big_xx[hi] + big_xx[nlo];
+            let ty = big_y[hi] + big_y[nlo];
+            let txy = big_xy[hi] - big_xy[nlo];
 
-        noise[i] = r - offset;
-        i += 1;
-        x += 1.0;
-    }
+            big_a = ty * txx - tx * txy;
+            big_b = tn * txy - tx * ty;
+            big_d = tn * txx - tx * tx;
+            r = (big_a + x * big_b) / big_d;
+            if r < 0.0 {
+                r = 0.0;
+            }
 
-    while i < n {
-        let lo = b[i] >> 16;
-        let hi = (b[i] & 0xffff) as usize;
-
-        if lo < 0 || lo as usize >= n {
-            break;
-        }
-        if hi >= n {
-            break;
+            noise[i] = r - offset;
+            i += 1;
+            x += 1.0;
         }
 
-        tn = big_n[hi] - big_n[lo as usize];
-        tx = big_x[hi] - big_x[lo as usize];
-        txx = big_xx[hi] - big_xx[lo as usize];
-        ty = big_y[hi] - big_y[lo as usize];
-        txy = big_xy[hi] - big_xy[lo as usize];
+        while i < n {
+            let lo = b[i] >> 16;
+            let hi = (b[i] & 0xffff) as usize;
 
-        big_a = ty * txx - tx * txy;
-        big_b = tn * txy - tx * ty;
-        big_d = tn * txx - tx * tx;
-        r = (big_a + x * big_b) / big_d;
+            if lo < 0 || lo as usize >= n {
+                break;
+            }
+            if hi >= n {
+                break;
+            }
 
-        if (12..=16).contains(&i) && crate::debug_flag!("LW_DEBUG_BNH") {
-            eprintln!(
-                "LW_BNH i={} lo={} hi={} x={:.1} tn={:.6} tx={:.6} txx={:.6} ty={:.6} txy={:.6} A={:.6} B={:.6} D={:.6} R={:.6} noise={:.6} offset={:.6}",
-                i,
-                lo,
-                hi,
-                x,
-                tn,
-                tx,
-                txx,
-                ty,
-                txy,
-                big_a,
-                big_b,
-                big_d,
-                r,
-                r - offset,
-                offset
-            );
+            let tn = big_n[hi] - big_n[lo as usize];
+            let tx = big_x[hi] - big_x[lo as usize];
+            let txx = big_xx[hi] - big_xx[lo as usize];
+            let ty = big_y[hi] - big_y[lo as usize];
+            let txy = big_xy[hi] - big_xy[lo as usize];
+
+            big_a = ty * txx - tx * txy;
+            big_b = tn * txy - tx * ty;
+            big_d = tn * txx - tx * tx;
+            r = (big_a + x * big_b) / big_d;
+
+            if (12..=16).contains(&i) && crate::debug_flag!("LW_DEBUG_BNH") {
+                eprintln!(
+                    "LW_BNH i={} lo={} hi={} x={:.1} tn={:.6} tx={:.6} txx={:.6} ty={:.6} txy={:.6} A={:.6} B={:.6} D={:.6} R={:.6} noise={:.6} offset={:.6}",
+                    i,
+                    lo,
+                    hi,
+                    x,
+                    tn,
+                    tx,
+                    txx,
+                    ty,
+                    txy,
+                    big_a,
+                    big_b,
+                    big_d,
+                    r,
+                    r - offset,
+                    offset
+                );
+            }
+            if (i == 118 || i == 127) && crate::debug_flag!("LW_DEBUG_BNH118") {
+                eprintln!(
+                    "LW_BNH i={} lo={} hi={} x={} tn={}(0x{:08x}) ty={}(0x{:08x}) txx={}(0x{:08x}) tx={}(0x{:08x}) txy={}(0x{:08x}) A={}(0x{:08x}) B={}(0x{:08x}) D={}(0x{:08x}) R={}(0x{:08x})",
+                    i,
+                    lo,
+                    hi,
+                    x,
+                    tn,
+                    tn.to_bits(),
+                    ty,
+                    ty.to_bits(),
+                    txx,
+                    txx.to_bits(),
+                    tx,
+                    tx.to_bits(),
+                    txy,
+                    txy.to_bits(),
+                    big_a,
+                    big_a.to_bits(),
+                    big_b,
+                    big_b.to_bits(),
+                    big_d,
+                    big_d.to_bits(),
+                    r,
+                    r.to_bits(),
+                );
+            }
+
+            if r < 0.0 {
+                r = 0.0;
+            }
+
+            noise[i] = r - offset;
+            i += 1;
+            x += 1.0;
         }
-        if (i == 118 || i == 127) && crate::debug_flag!("LW_DEBUG_BNH118") {
-            eprintln!(
-                "LW_BNH i={} lo={} hi={} x={} tn={}(0x{:08x}) ty={}(0x{:08x}) txx={}(0x{:08x}) tx={}(0x{:08x}) txy={}(0x{:08x}) A={}(0x{:08x}) B={}(0x{:08x}) D={}(0x{:08x}) R={}(0x{:08x})",
-                i,
-                lo,
-                hi,
-                x,
-                tn,
-                tn.to_bits(),
-                ty,
-                ty.to_bits(),
-                txx,
-                txx.to_bits(),
-                tx,
-                tx.to_bits(),
-                txy,
-                txy.to_bits(),
-                big_a,
-                big_a.to_bits(),
-                big_b,
-                big_b.to_bits(),
-                big_d,
-                big_d.to_bits(),
-                r,
-                r.to_bits(),
-            );
-        }
 
-        if r < 0.0 {
-            r = 0.0;
+        while i < n {
+            r = (big_a + x * big_b) / big_d;
+            if r < 0.0 {
+                r = 0.0;
+            }
+            noise[i] = r - offset;
+            i += 1;
+            x += 1.0;
         }
-
-        noise[i] = r - offset;
-        i += 1;
-        x += 1.0;
-    }
-
-    while i < n {
-        r = (big_a + x * big_b) / big_d;
-        if r < 0.0 {
-            r = 0.0;
-        }
-        noise[i] = r - offset;
-        i += 1;
-        x += 1.0;
-    }
+    } // end loops 2-3 scope
 
     if fixed <= 0 {
         return;
@@ -1097,73 +1099,81 @@ fn bark_noise_hybridmp(n: usize, b: &[i64], f: &[f32], noise: &mut [f32], offset
 
     i = 0;
     x = 0.0;
-    while i < n {
-        let hi = i + fixed as usize / 2;
-        let lo = hi as i64 - fixed as i64;
+    // Loops 4-5-6 also share big_a/b/d/r the same way.
+    {
+        let mut big_a = 0.0_f32;
+        let mut big_b = 0.0_f32;
+        let mut big_d = 1.0_f32;
+        let mut r = 0.0_f32;
 
-        if hi >= n {
-            break;
-        }
-        if lo >= 0 {
-            break;
-        }
+        while i < n {
+            let hi = i + fixed as usize / 2;
+            let lo = hi as i64 - fixed as i64;
 
-        let nlo = (-lo) as usize;
-        tn = big_n[hi] + big_n[nlo];
-        tx = big_x[hi] - big_x[nlo];
-        txx = big_xx[hi] + big_xx[nlo];
-        ty = big_y[hi] + big_y[nlo];
-        txy = big_xy[hi] - big_xy[nlo];
+            if hi >= n {
+                break;
+            }
+            if lo >= 0 {
+                break;
+            }
 
-        big_a = ty * txx - tx * txy;
-        big_b = tn * txy - tx * ty;
-        big_d = tn * txx - tx * tx;
-        r = (big_a + x * big_b) / big_d;
+            let nlo = (-lo) as usize;
+            let tn = big_n[hi] + big_n[nlo];
+            let tx = big_x[hi] - big_x[nlo];
+            let txx = big_xx[hi] + big_xx[nlo];
+            let ty = big_y[hi] + big_y[nlo];
+            let txy = big_xy[hi] - big_xy[nlo];
 
-        if r - offset < noise[i] {
-            noise[i] = r - offset;
-        }
-        i += 1;
-        x += 1.0;
-    }
+            big_a = ty * txx - tx * txy;
+            big_b = tn * txy - tx * ty;
+            big_d = tn * txx - tx * tx;
+            r = (big_a + x * big_b) / big_d;
 
-    while i < n {
-        let hi = i + fixed as usize / 2;
-        let lo = hi as i64 - fixed as i64;
-
-        if hi >= n {
-            break;
-        }
-        if lo < 0 {
-            break;
+            if r - offset < noise[i] {
+                noise[i] = r - offset;
+            }
+            i += 1;
+            x += 1.0;
         }
 
-        tn = big_n[hi] - big_n[lo as usize];
-        tx = big_x[hi] - big_x[lo as usize];
-        txx = big_xx[hi] - big_xx[lo as usize];
-        ty = big_y[hi] - big_y[lo as usize];
-        txy = big_xy[hi] - big_xy[lo as usize];
+        while i < n {
+            let hi = i + fixed as usize / 2;
+            let lo = hi as i64 - fixed as i64;
 
-        big_a = ty * txx - tx * txy;
-        big_b = tn * txy - tx * ty;
-        big_d = tn * txx - tx * tx;
-        r = (big_a + x * big_b) / big_d;
+            if hi >= n {
+                break;
+            }
+            if lo < 0 {
+                break;
+            }
 
-        if r - offset < noise[i] {
-            noise[i] = r - offset;
+            let tn = big_n[hi] - big_n[lo as usize];
+            let tx = big_x[hi] - big_x[lo as usize];
+            let txx = big_xx[hi] - big_xx[lo as usize];
+            let ty = big_y[hi] - big_y[lo as usize];
+            let txy = big_xy[hi] - big_xy[lo as usize];
+
+            big_a = ty * txx - tx * txy;
+            big_b = tn * txy - tx * ty;
+            big_d = tn * txx - tx * tx;
+            r = (big_a + x * big_b) / big_d;
+
+            if r - offset < noise[i] {
+                noise[i] = r - offset;
+            }
+            i += 1;
+            x += 1.0;
         }
-        i += 1;
-        x += 1.0;
-    }
 
-    while i < n {
-        r = (big_a + x * big_b) / big_d;
-        if r - offset < noise[i] {
-            noise[i] = r - offset;
+        while i < n {
+            r = (big_a + x * big_b) / big_d;
+            if r - offset < noise[i] {
+                noise[i] = r - offset;
+            }
+            i += 1;
+            x += 1.0;
         }
-        i += 1;
-        x += 1.0;
-    }
+    } // end loops 4-6 scope
 }
 
 // ---------------------------------------------------------------------------
