@@ -30,7 +30,15 @@ fn ffmpeg_decode(path: &Path, rate: u32, ch: u16) -> Vec<i16> {
             "-",
         ])
         .output()
-        .unwrap();
+        .unwrap_or_else(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                panic!(
+                    "ffmpeg not on PATH — install it (e.g. `brew install ffmpeg` on macOS, \
+                     `apt install ffmpeg` on Debian/Ubuntu) and re-run"
+                );
+            }
+            panic!("failed to invoke ffmpeg on {}: {e}", path.display());
+        });
     out.stdout
         .chunks_exact(2)
         .map(|c| i16::from_le_bytes([c[0], c[1]]))
@@ -41,13 +49,19 @@ fn oracle_encode(samples: &[i16], rate: u32, ch: u16) -> Vec<u8> {
     let raw: Vec<u8> = samples.iter().flat_map(|&s| s.to_le_bytes()).collect();
     use std::io::Write;
     use std::process::Stdio;
-    let mut child = Command::new("./tools/oracle-encoder/oracle-encoder")
+    let bin = "./tools/oracle-encoder/oracle-encoder";
+    let mut child = Command::new(bin)
         .args([&rate.to_string(), &ch.to_string()])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
-        .unwrap();
+        .unwrap_or_else(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                panic!("{bin} not found — build it first with `./tools/oracle-encoder/build.sh`");
+            }
+            panic!("failed to spawn {bin}: {e}");
+        });
     child.stdin.take().unwrap().write_all(&raw).unwrap();
     child.wait_with_output().unwrap().stdout
 }

@@ -2,3 +2,10 @@
 status-level = "fail"
 final-status-level = "flaky"
 slow-timeout = { period = "30s", terminate-after = 2 }
+
+# corpus_parity_sweep walks thousands of files sequentially; the default
+# 60s kill-after-2-slow-periods timer fires long before it finishes. Keep
+# the slow-warning ping but don't terminate.
+[[profile.default.overrides]]
+filter = 'test(corpus_parity_sweep)'
+slow-timeout = { period = "60s" }
